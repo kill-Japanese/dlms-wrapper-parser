@@ -1,23 +1,123 @@
+# Render 部署配置文件
+#
+# 使用方法：
+# 1. 将代码推送到 GitHub 仓库
+# 2. 在 Render 控制台点击 "New" -> "Blueprint"
+# 3. 选择仓库，Render 会自动读取此文件
+# 4. 配置环境变量后点击 "Apply"
+#
+# 部署后会创建两个服务：
+# - dlms-parser-backend: Python FastAPI 后端 Web Service
+# - dlms-parser-frontend: React 前端 Static Site
+
 services:
+  # ============================================================
+  # 后端服务 - Python FastAPI
+  # ============================================================
   - type: web
     name: dlms-parser-backend
     runtime: python
     plan: starter
-    buildCommand: cd backend && pip install -r requirements.txt
-    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # 后端服务的根目录（相对于仓库根目录）
     rootDir: backend
+    # 构建命令：安装 Python 依赖
+    buildCommand: pip install -r requirements.txt
+    # 启动命令：使用 uvicorn 启动 FastAPI
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # 健康检查路径
+    healthCheckPath: /health
+    # 自动部署
+    autoDeploy: yes
+    # 环境变量
     envVars:
+      # Python 版本
       - key: PYTHON_VERSION
         value: 3.11.0
 
+      # 应用配置
+      - key: APP_NAME
+        value: "DLMS Wrapper Parser"
+
+      - key: APP_VERSION
+        value: "1.0.0"
+
+      # 默认加密密钥（可选，十六进制格式，32字符=16字节）
+      # 生产环境建议在 Render 控制台手动设置，不要提交到代码仓库
+      - key: DEFAULT_ENCRYPTION_KEY
+        value: ""
+
+      # 日志级别
+      - key: LOG_LEVEL
+        value: "INFO"
+
+      # 上传文件目录（Render 的文件系统是临时的，重启会丢失）
+      - key: UPLOAD_DIR
+        value: "/tmp/uploads"
+
+      # 日志目录
+      - key: LOG_DIR
+        value: "/tmp/logs"
+
+      # CORS 源（前端域名，用于限制跨域访问）
+      # 留空表示允许所有来源（开发环境）
+      - key: CORS_ORIGINS
+        value: "*"
+
+  # ============================================================
+  # 前端服务 - React 静态站点
+  # ============================================================
   - type: static
     name: dlms-parser-frontend
     plan: starter
-    buildCommand: cd frontend && npm install && npm run build
-    staticPublishPath: ./frontend/dist
+    # 构建命令：安装依赖并构建
+    buildCommand: npm install && npm run build
+    # 构建输出目录（相对于仓库根目录）
+    staticPublishPath: frontend/dist
+    # 自动部署
+    autoDeploy: yes
+    # 环境变量（构建时可用）
     envVars:
-      - key: VITE_API_URL
+      # 后端 API 地址（构建时注入）
+      # fromService 会自动填入后端服务的域名
+      - key: VITE_API_BASE_URL
         fromService:
           type: web
           name: dlms-parser-backend
           property: host
+
+      # 或手动指定 API URL（如果后端不在 Render 上）
+      # - key: VITE_API_BASE_URL
+      #   value: "https://your-backend.example.com/api"
+
+    # 路由重写规则（SPA 应用需要将所有路由指向 index.html）
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+# ============================================================
+# 环境变量说明
+# ============================================================
+#
+# 后端环境变量：
+# - PYTHON_VERSION: Python 版本，默认 3.11.0
+# - APP_NAME: 应用名称
+# - APP_VERSION: 应用版本
+# - DEFAULT_ENCRYPTION_KEY: 默认加密密钥（十六进制，可选）
+# - LOG_LEVEL: 日志级别 (DEBUG/INFO/WARNING/ERROR)
+# - UPLOAD_DIR: 上传文件目录
+# - LOG_DIR: 日志目录
+# - CORS_ORIGINS: 允许的跨域源，逗号分隔
+# - TCP_PORT: TCP 服务器端口（Render 不支持外部 TCP 访问，仅内部使用）
+# - PORT: 服务监听端口（由 Render 自动设置）
+#
+# 前端环境变量（构建时）：
+# - VITE_API_BASE_URL: 后端 API 基础 URL
+#
+# 注意事项：
+# 1. Render 的 Web Service 只支持 HTTP/HTTPS 和 WebSocket，不支持原生 TCP
+#    TCP Server 功能在 Render 环境下无法对外提供服务
+# 2. Render 的文件系统是临时的，应用重启后数据会丢失
+#    上传的数模文件只在当前实例存活期间有效
+# 3. 生产环境建议将 DEFAULT_ENCRYPTION_KEY 设置为空，
+#    由用户在前端手动输入密钥

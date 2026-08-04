@@ -11,8 +11,9 @@ from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
 from app.config import settings
-from app.routers import parse, datamodel, stream
+from app.routers import parse, datamodel, stream, auto
 from app.services.tcp_server import tcp_server
+from app.services.auto_handler import auto_handler
 from app.services.log_manager import log_manager
 
 
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理 - 启动时初始化TCP服务器（可选）"""
     # 启动时：可选启动TCP服务器
     tcp_server.set_ws_manager(ws_manager)
+    auto_handler.set_tcp_server(tcp_server)
     # 默认不自动启动TCP服务器，由API控制
     yield
     # 关闭时：停止TCP服务器
@@ -82,6 +84,7 @@ app.add_middleware(
 app.include_router(parse.router)
 app.include_router(datamodel.router)
 app.include_router(stream.router)
+app.include_router(auto.router)
 
 
 @app.get("/health", summary="健康检查")

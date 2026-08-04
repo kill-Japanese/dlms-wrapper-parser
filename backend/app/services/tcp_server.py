@@ -266,6 +266,50 @@ class TcpServer:
             }
             asyncio.create_task(self._ws_manager.broadcast(message))
 
+        # 检测DataNotification并触发自动处理
+        self._check_and_trigger_auto_handler(conn_id, parse_result)
+
+    def _check_and_trigger_auto_handler(self, conn_id: str, parse_result):
+        """
+        检测帧是否为DataNotification，如果是则触发自动处理流程
+
+        Args:
+            conn_id: 连接ID
+            parse_result: 解析结果
+        """
+        try:
+            # 检查APDU是否为DataNotification
+            apdu = parse_result.apdu
+            if not apdu or not isinstance(apdu, dict):
+                return
+
+            type_name = apdu.get("type_name", "")
+            if type_name != "DataNotification":
+                return
+
+            # 获取设备ID（从连接信息中获取，如果有的话）
+            device_id = None
+            client = self.clients.get(conn_id)
+            if client and client["info"].device_id:
+                device_id = client["info"].device_id
+
+            # 触发自动处理
+            from app.services.auto_handler import auto_handler
+            asyncio.create_task(
+                auto_handler.handle_data_notification(
+                    connection_id=conn_id,
+                    device_id=device_id,
+                    notification_data=apdu,
+                )
+            )
+
+            log_manager.info("tcp", "auto_handler",
+                           f"检测到DataNotification，已触发自动处理流程 (conn={conn_id})")
+
+        except Exception as e:
+            log_manager.error("tcp", "auto_handler",
+                            f"自动处理触发异常: {e}")
+
     async def _cleanup_connection(self, conn_id: str):
         """
         清理连接

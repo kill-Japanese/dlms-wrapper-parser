@@ -192,38 +192,63 @@ def _is_ciphered_payload(data: bytes) -> bool:
     """
     判断载荷是否为加密数据
 
-    通过检查第一个字节（安全控制字节）来判断。
-    加密APDU通常以 GeneralGloCiphering(219) 或类似标签开始。
-    但如果是在加密层内部，第一个字节是Security Control。
-
-    这里做一个启发式判断：
-    - 如果第一个字节是常见的安全控制字节值，则认为是加密的
+    通过多步启发式判断：
+    1. 首先检查是否为已知的明文APDU类型（排除加密类型）
+    2. 检查是否为GeneralGloCiphering等加密APDU
+    3. 检查是否为原始加密数据格式（以安全控制字节开始）
     """
     if not data:
         return False
 
     first_byte = data[0]
 
-    # 常见的安全控制字节值:
-    # 0x00 - 无加密无认证（少见）
-    # 0x01 - 仅加密
-    # 0x02 - 仅认证
-    # 0x03 - 加密+认证
-    # 0x05 - 加密+压缩
-    # 0x07 - 加密+认证+压缩
-    # 0x10 - 0x1F 不同key_id的组合
+    # 常见的明文APDU标签（如果匹配，大概率不是加密数据）
+    # DataNotification=15, GetRequest=192, GetResponse=193,
+    # SetRequest=194, SetResponse=195, EventNotification=196,
+    # ActionRequest=199, ActionResponse=200, InitiateRequest=1,
+    # InitiateResponse=8, ConfirmedServiceError=14
+    plaintext_apdu_tags = {15, 192, 193, 194, 195, 196, 199, 200, 1, 8, 14}
 
-    # 检查是否像安全控制字节（低3位组合合理）
-    # 如果是GeneralGloCiphering APDU，tag是219
-    if first_byte == 219:  # GeneralGloCiphering
+    if first_byte in plaintext_apdu_tags:
+        # 还需要进一步验证：检查是否真的是明文APDU
+        # 对于DataNotification(15)，检查invoke_id是否合理
+        if first_byte == 15 and len(data) >= 5:
+            # DataNotification: tag(1) + invoke_id(4) + ...
+            # invoke_id的高位字节通常是0或较小的值
+            # 如果invoke_id看起来像一个合理的值，认为是明文
+            invoke_id_high = data[1]
+            if invoke_id_high < 0x10:  # 高位字节较小，更可能是invoke_id
+                return False
+        elif first_byte in (192, 193, 194, 195, 196, 199, 200):
+            # Get/Set/Action类APDU: tag(1) + type(1) + invoke_id(4)
+            if len(data) >= 6:
+                get_type = data[1]
+                # type通常是1, 2, 或3
+                if get_type in (1, 2, 3):
+                    return False
+
+    # 加密APDU标签
+    # GeneralGloCiphering=219, GeneralCiphering=218,
+    # GeneralDedCiphering=220, GeneralSign=216
+    cipher_apdu_tags = {216, 218, 219, 220}
+    if first_byte in cipher_apdu_tags:
         return True
 
-    # 如果直接是加密数据（从安全控制字节开始）
-    # 安全控制字节的bit 5-7通常为0
-    if (first_byte & 0xE0) == 0:  # 高3位为0
-        # 且至少有加密或认证位
-        if first_byte & 0x03:
-            return True
+    # 检查是否为原始加密数据（从安全控制字节开始，无APDU标签）
+    # 安全控制字节的特征:
+    # - bit 5-7（高位3位）为0
+    # - 至少设置了加密或认证位（bit 0 或 bit 1）
+    # - 后面紧跟着系统标题长度指示
+    if (first_byte & 0xE0) == 0 and (first_byte & 0x03):
+        # 验证: 安全控制字节后应该是8字节系统标题 + 调用计数器长度字节
+        if len(data) > 9:
+            # 系统标题是8字节，后面是调用计数器长度(通常是4)
+            ic_length_pos = 9  # 1(SC) + 8(ST) = 9
+            ic_length = data[ic_length_pos]
+            # 调用计数器长度通常在1-5之间
+            if 1 <= ic_length <= 5:
+                # 很可能是加密数据
+                return True
 
     return False
 
