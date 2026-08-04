@@ -1,12 +1,35 @@
 import axios from 'axios'
 
+// 规范化 baseURL，确保完整域名后面加上 /api 路径
+// 例如：https://example.com -> https://example.com/api
+// 但 /api 本身保持不变
+const normalizeBaseURL = (url) => {
+  if (!url) return '/api'
+  // 如果是相对路径（以 / 开头），保持不变
+  if (url.startsWith('/')) return url
+  // 如果是完整 URL（http:// 或 https://），确保末尾有 /api
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    // 去掉末尾的斜杠
+    const trimmed = url.replace(/\/+$/, '')
+    // 如果已经以 /api 结尾，直接返回
+    if (trimmed.endsWith('/api')) return trimmed
+    // 否则加上 /api
+    return trimmed + '/api'
+  }
+  return url
+}
+
 // 从 localStorage 获取后端地址（如果用户手动配置过），否则使用环境变量，最后用默认值
 const getBaseURL = () => {
   const savedUrl = localStorage.getItem('api_base_url')
   if (savedUrl) {
-    return savedUrl
+    return normalizeBaseURL(savedUrl)
   }
-  return import.meta.env.VITE_API_BASE_URL || '/api'
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  if (envUrl) {
+    return normalizeBaseURL(envUrl)
+  }
+  return '/api'
 }
 
 const api = axios.create({
@@ -17,19 +40,45 @@ const api = axios.create({
   }
 })
 
-// 动态更新 baseURL 的方法
+// 动态更新 baseURL 的方法（用户输入的是后端根地址，如 https://example.com）
 export const updateBaseURL = (url) => {
-  api.defaults.baseURL = url
+  const normalized = normalizeBaseURL(url)
+  api.defaults.baseURL = normalized
   if (url) {
+    // 保存原始输入的地址，方便用户下次编辑
     localStorage.setItem('api_base_url', url)
   } else {
     localStorage.removeItem('api_base_url')
   }
 }
 
-// 获取当前 baseURL
+// 获取用户配置的原始后端地址（不含 /api，用于显示）
+export const getBackendURL = () => {
+  const savedUrl = localStorage.getItem('api_base_url')
+  if (savedUrl) return savedUrl
+  const envUrl = import.meta.env.VITE_API_BASE_URL
+  if (envUrl) return envUrl
+  return '/api'
+}
+
+// 获取当前 baseURL（含 /api）
 export const getCurrentBaseURL = () => {
   return api.defaults.baseURL
+}
+
+// 构建健康检查 URL（健康检查在根路径，不在 /api 下）
+const getHealthCheckURL = () => {
+  const base = api.defaults.baseURL
+  // 如果 baseURL 以 /api 结尾，替换成 /health
+  if (base.endsWith('/api')) {
+    return base.slice(0, -4) + '/health'
+  }
+  // 如果是相对路径 /api，替换成 /health
+  if (base === '/api') {
+    return '/health'
+  }
+  // 否则直接在末尾加 /health
+  return base.replace(/\/+$/, '') + '/health'
 }
 
 // 请求拦截器
@@ -93,9 +142,10 @@ api.interceptors.response.use(
   }
 )
 
-// 健康检查接口
+// 健康检查接口（使用完整 URL，绕过 baseURL）
 export function checkHealth() {
-  return api.get('/health')
+  const healthURL = getHealthCheckURL()
+  return axios.get(healthURL, { timeout: 10000 }).then((response) => response.data)
 }
 
 export default api

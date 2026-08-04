@@ -10,7 +10,7 @@ import StreamPage from './pages/StreamPage.jsx'
 import LogsPage from './pages/LogsPage.jsx'
 import PullPresetsPage from './pages/PullPresetsPage.jsx'
 import useAppStore from './store/appStore.js'
-import { updateBaseURL, getCurrentBaseURL } from './services/api.js'
+import { updateBaseURL, getBackendURL, getCurrentBaseURL } from './services/api.js'
 
 const { Content } = Layout
 
@@ -43,7 +43,7 @@ function App() {
   }
 
   const openConfigModal = () => {
-    setBackendUrlInput(getCurrentBaseURL())
+    setBackendUrlInput(getBackendURL())
     setConfigModalVisible(true)
   }
 
@@ -119,7 +119,9 @@ function App() {
             onPressEnter={handleSaveBackendUrl}
           />
           <p style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-            当前地址：{getCurrentBaseURL()}
+            当前配置地址：{getBackendURL()}
+            <br />
+            实际请求地址：{getCurrentBaseURL()}
           </p>
         </Modal>
 
