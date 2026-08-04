@@ -75,15 +75,6 @@ services:
     staticPublishPath: frontend/dist
     # 自动部署
     autoDeploy: yes
-    # 环境变量（构建时可用）
-    envVars:
-      # 后端 API 地址（构建时注入）
-      # fromService 会自动填入后端服务的域名
-      - key: VITE_API_BASE_URL
-        fromService:
-          type: web
-          name: dlms-parser-backend
-          property: host
 
     # 路由重写规则（SPA 应用需要将所有路由指向 index.html）
     routes:
