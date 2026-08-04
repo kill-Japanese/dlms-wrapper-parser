@@ -24,7 +24,7 @@ from typing import Optional, Dict, Tuple, List
 
 from openpyxl import load_workbook
 
-from app.models.datamodel import CosemObject
+from app.models.datamodel import CosemObject, CosemObjectDetail, CosemAttribute, CosemMethod
 from app.utils.obis_utils import normalize_obis, obis_bytes_to_str
 from app.utils.hex_utils import hex_to_bytes
 
@@ -271,6 +271,7 @@ class DataModelManager:
                         attribute_id=0,
                         unit="",
                         scaler=1.0,
+                        version=str(e_val).strip() if e_val else "",
                     )
                     self._add_object(obj)
                     count += 1
@@ -631,6 +632,78 @@ class DataModelManager:
                     break
 
         return results
+
+    def get_object_detail(self, class_id: int, obis: str) -> Optional[CosemObjectDetail]:
+        """
+        获取单个对象的完整详情（包含所有属性和方法）
+
+        Args:
+            class_id: 类ID
+            obis: OBIS码字符串
+
+        Returns:
+            CosemObjectDetail 或 None（如果对象不存在）
+        """
+        if not self._loaded:
+            return None
+
+        try:
+            obis_tuple = normalize_obis(obis)
+        except ValueError:
+            return None
+
+        # 先找对象本身 (attribute_id=0)
+        obj_key = (class_id, obis_tuple, 0)
+        base_obj = self._objects.get(obj_key)
+        if base_obj is None:
+            # 如果没有attribute_id=0的条目，尝试找该对象的任意属性来获取基本信息
+            found = None
+            for (c_id, o_tuple, a_id), obj in self._objects.items():
+                if c_id == class_id and o_tuple == obis_tuple and a_id > 0:
+                    found = obj
+                    break
+            if found is None:
+                return None
+            base_obj = found
+
+        # 收集属性 (attribute_id > 0)
+        attributes = []
+        methods = []
+
+        for (c_id, o_tuple, a_id), obj in self._objects.items():
+            if c_id == class_id and o_tuple == obis_tuple:
+                if a_id > 0:
+                    # 属性
+                    attributes.append(CosemAttribute(
+                        attribute_id=a_id,
+                        name=obj.name,
+                        data_type=obj.data_type,
+                        description=obj.description,
+                        unit=obj.unit,
+                        scaler=obj.scaler,
+                    ))
+                elif a_id < 0:
+                    # 方法（用负的attribute_id表示）
+                    methods.append(CosemMethod(
+                        method_id=-a_id,
+                        name=obj.name,
+                        data_type=obj.data_type,
+                        description=obj.description,
+                    ))
+
+        # 按ID排序
+        attributes.sort(key=lambda a: a.attribute_id)
+        methods.sort(key=lambda m: m.method_id)
+
+        return CosemObjectDetail(
+            class_id=class_id,
+            obis=obis_bytes_to_str(bytes(obis_tuple)) if isinstance(obis_tuple, tuple) else obis,
+            name=base_obj.name,
+            version=base_obj.version,
+            description=base_obj.description,
+            attributes=attributes,
+            methods=methods,
+        )
 
     def get_classes(self) -> List[int]:
         """获取所有类ID列表"""

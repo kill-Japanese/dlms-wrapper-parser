@@ -24,8 +24,13 @@ async def parse_hex(request: ParseRequest):
     解析DLMS帧数据（十六进制字符串输入）
 
     - **hex_data**: 十六进制帧数据，可以带空格、换行等
-    - **encryption_key**: 加密密钥（可选，十六进制格式）
+    - **encryption_key**: 加密密钥（兼容别名，映射到guek，十六进制格式）
+    - **guek**: Global Unicast Encryption Key - 全局单播加密密钥（十六进制）
+    - **gubk**: Global Unicast Broadcast Key - 广播密钥（十六进制）
+    - **ak**: Authentication Key - 认证密钥（十六进制）
+    - **kek**: Key Encryption Key - 密钥加密密钥（十六进制）
     - **system_title**: 系统标题（可选，十六进制格式）
+    - **invocation_counter**: 调用计数器（可选）
     """
     if not request.hex_data or not request.hex_data.strip():
         raise HTTPException(status_code=400, detail="hex_data不能为空")
@@ -34,7 +39,12 @@ async def parse_hex(request: ParseRequest):
         result = parse_frame(
             hex_data=request.hex_data,
             encryption_key=request.encryption_key,
+            guek=request.guek,
+            gubk=request.gubk,
+            ak=request.ak,
+            kek=request.kek,
             system_title=request.system_title,
+            invocation_counter=request.invocation_counter,
         )
         return result
     except Exception as e:
@@ -104,8 +114,14 @@ async def build_frame_endpoint(request: BuildRequest):
     - **src_wport**: 源WPort (默认1)
     - **dst_wport**: 目的WPort (默认16)
     - **encrypt**: 是否加密 (默认false)
-    - **encryption_key**: 加密密钥 (加密时必填)
+    - **encryption_key**: 加密密钥 (兼容别名，映射到guek)
+    - **guek**: Global Unicast Encryption Key - 全局单播加密密钥（十六进制）
+    - **gubk**: Global Unicast Broadcast Key - 广播密钥（十六进制）
+    - **ak**: Authentication Key - 认证密钥（十六进制）
+    - **kek**: Key Encryption Key - 密钥加密密钥（十六进制）
     - **system_title**: 系统标题 (加密时必填)
+    - **invocation_counter**: 调用计数器 (默认1)
+    - **key_id**: 密钥标识 (0=unicast/GUEK, 1=broadcast/GUBK, 2=system)
     """
     try:
         result = build_frame(
@@ -115,7 +131,13 @@ async def build_frame_endpoint(request: BuildRequest):
             dst_wport=request.dst_wport,
             encrypt=request.encrypt,
             encryption_key=request.encryption_key,
+            guek=request.guek,
+            gubk=request.gubk,
+            ak=request.ak,
+            kek=request.kek,
             system_title=request.system_title,
+            invocation_counter=request.invocation_counter or 1,
+            key_id=request.key_id,
         )
         return BuildResponse(**result)
     except NotImplementedError as e:

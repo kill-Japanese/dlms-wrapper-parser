@@ -1,19 +1,64 @@
 import api from './api.js'
 
-// 解析 DLMS Wrapper 数据
-export function parseWrapper(hexData, options = {}) {
-  return api.post('/parser/parse', {
-    hex: hexData,
-    ...options
-  })
+// 解析 DLMS 十六进制帧数据
+export function parseHex(hexData, securityConfig = {}) {
+  const payload = {
+    hex_data: hexData
+  }
+
+  // 添加安全配置参数（仅在有值时添加）
+  if (securityConfig.guek) payload.guek = securityConfig.guek
+  if (securityConfig.gubk) payload.gubk = securityConfig.gubk
+  if (securityConfig.ak) payload.ak = securityConfig.ak
+  if (securityConfig.kek) payload.kek = securityConfig.kek
+  if (securityConfig.systemTitle) payload.system_title = securityConfig.systemTitle
+  if (securityConfig.invocationCounter !== undefined && securityConfig.invocationCounter !== null) {
+    payload.invocation_counter = securityConfig.invocationCounter
+  }
+  // 兼容旧字段
+  if (securityConfig.blockCipherKey && !securityConfig.guek) {
+    payload.encryption_key = securityConfig.blockCipherKey
+  }
+
+  return api.post('/parse/hex', payload)
 }
 
-// 打包 DLMS Wrapper 数据
+// 构建 DLMS 帧
+export function buildFrame(apduType, params, options = {}) {
+  const payload = {
+    apdu_type: apduType,
+    params: params,
+    src_wport: options.srcWPort || 1,
+    dst_wport: options.dstWPort || 16,
+    encrypt: options.encrypt || false,
+    key_id: options.keyId || 0
+  }
+
+  // 添加安全配置参数
+  if (options.guek) payload.guek = options.guek
+  if (options.gubk) payload.gubk = options.gubk
+  if (options.ak) payload.ak = options.ak
+  if (options.kek) payload.kek = options.kek
+  if (options.systemTitle) payload.system_title = options.systemTitle
+  if (options.invocationCounter !== undefined) {
+    payload.invocation_counter = options.invocationCounter
+  }
+  // 兼容旧字段
+  if (options.blockCipherKey && !options.guek) {
+    payload.encryption_key = options.blockCipherKey
+  }
+
+  return api.post('/parse/build', payload)
+}
+
+// 解析 DLMS Wrapper 数据（兼容旧接口）
+export function parseWrapper(hexData, options = {}) {
+  return parseHex(hexData, options)
+}
+
+// 打包 DLMS Wrapper 数据（兼容旧接口）
 export function packWrapper(data, options = {}) {
-  return api.post('/parser/pack', {
-    data,
-    ...options
-  })
+  return buildFrame(data.apdu_type || 'GetRequest', data.params || {}, options)
 }
 
 // 获取解析历史
@@ -70,6 +115,8 @@ export function clearLogs(type = 'all') {
 }
 
 export default {
+  parseHex,
+  buildFrame,
   parseWrapper,
   packWrapper,
   getParseHistory,

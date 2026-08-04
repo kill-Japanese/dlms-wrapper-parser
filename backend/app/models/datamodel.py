@@ -16,6 +16,7 @@ class CosemObject(BaseModel):
     attribute_id: Optional[int] = Field(default=None, description="属性ID")
     unit: str = Field(default="", description="单位")
     scaler: float = Field(default=1.0, description="倍率")
+    version: str = Field(default="", description="类版本")
 
     model_config = {
         "json_schema_extra": {
@@ -47,3 +48,35 @@ class DataModelSearchResponse(BaseModel):
 
     results: List[CosemObject] = Field(default_factory=list, description="搜索结果")
     total: int = Field(default=0, description="总匹配数")
+
+
+class CosemAttribute(BaseModel):
+    """COSEM属性"""
+
+    attribute_id: int = Field(description="属性ID")
+    name: str = Field(default="", description="属性名称")
+    data_type: str = Field(default="", description="数据类型")
+    description: str = Field(default="", description="描述")
+    unit: str = Field(default="", description="单位")
+    scaler: float = Field(default=1.0, description="倍率")
+
+
+class CosemMethod(BaseModel):
+    """COSEM方法"""
+
+    method_id: int = Field(description="方法ID")
+    name: str = Field(default="", description="方法名称")
+    data_type: str = Field(default="", description="返回类型")
+    description: str = Field(default="", description="描述")
+
+
+class CosemObjectDetail(BaseModel):
+    """COSEM对象完整详情（含所有属性和方法）"""
+
+    class_id: int = Field(description="类ID (Class ID)")
+    obis: str = Field(description="OBIS码 (A-B:C.D.E.F格式)")
+    name: str = Field(default="", description="对象名称")
+    version: str = Field(default="", description="类版本")
+    description: str = Field(default="", description="描述")
+    attributes: List[CosemAttribute] = Field(default_factory=list, description="属性列表")
+    methods: List[CosemMethod] = Field(default_factory=list, description="方法列表")

@@ -18,7 +18,7 @@ Wrapper -> Ciphering -> Compression -> APDU -> DataModel
 4. Wrapper封装 - 添加WPD头
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 
 from app.models.parse_result import ParseResult, ParseLogEntry
 from app.models.wrapper import WrapperFrame
@@ -37,14 +37,33 @@ def parse_frame(
     hex_data: str,
     encryption_key: Optional[str] = None,
     system_title: Optional[str] = None,
+    guek: Optional[str] = None,
+    gubk: Optional[str] = None,
+    ak: Optional[str] = None,
+    kek: Optional[str] = None,
+    invocation_counter: Optional[int] = None,
 ) -> ParseResult:
     """
     解析DLMS帧（完整协议栈解析）
 
+    支持多种DLMS密钥类型：
+    - guek: Global Unicast Encryption Key（全局单播加密密钥，默认使用）
+    - gubk: Global Unicast Broadcast Key（广播密钥）
+    - ak: Authentication Key（认证密钥）
+    - kek: Key Encryption Key（密钥加密密钥）
+    - encryption_key: 兼容别名，映射到 guek
+
+    根据加密帧中的 key_id 自动选择对应密钥进行解密。
+
     Args:
         hex_data: 十六进制帧数据
-        encryption_key: 加密密钥（十六进制字符串，可选）
+        encryption_key: 加密密钥（十六进制字符串，兼容别名，映射到guek）
         system_title: 系统标题（十六进制字符串，可选，用于解密验证）
+        guek: Global Unicast Encryption Key（十六进制）
+        gubk: Global Unicast Broadcast Key（十六进制）
+        ak: Authentication Key（十六进制）
+        kek: Key Encryption Key（十六进制）
+        invocation_counter: 调用计数器（可选）
 
     Returns:
         ParseResult: 完整的解析结果
@@ -57,6 +76,21 @@ def parse_frame(
         timestamp=timestamp,
         raw_hex=hex_data.strip(),
     )
+
+    # 构建密钥字典：guek 优先，encryption_key 作为兼容别名
+    effective_guek = guek or encryption_key
+    keys_dict: Dict[str, Optional[bytes]] = {}
+    if effective_guek:
+        keys_dict["guek"] = hex_to_bytes(effective_guek)
+    if gubk:
+        keys_dict["gubk"] = hex_to_bytes(gubk)
+    if ak:
+        keys_dict["ak"] = hex_to_bytes(ak)
+    if kek:
+        keys_dict["kek"] = hex_to_bytes(kek)
+
+    # 用于向后兼容的单一密钥（GUEK）
+    single_key_bytes = keys_dict.get("guek") if keys_dict else None
 
     try:
         # Step 1: 转换为字节
@@ -96,11 +130,25 @@ def parse_frame(
             if _is_ciphered_payload(payload):
                 log_manager.info(frame_id, "ciphering", "检测到加密帧")
 
-                key_bytes = hex_to_bytes(encryption_key) if encryption_key else None
+                has_any_key = bool(keys_dict)
 
-                if key_bytes:
-                    plaintext, cipher_frame = parse_ciphered(payload, key_bytes)
+                if has_any_key:
+                    # 使用密钥字典，根据key_id自动选择密钥
+                    plaintext, cipher_frame = parse_ciphered(
+                        payload,
+                        key=single_key_bytes,
+                        keys=keys_dict if len(keys_dict) > 1 else None,
+                    )
                     result.ciphering = cipher_frame
+
+                    # 记录使用的密钥类型
+                    key_id = cipher_frame.cipher_info.key_id if cipher_frame.cipher_info else 0
+                    key_type_names = {0: "GUEK (unicast)", 1: "GUBK (broadcast)", 2: "System Key"}
+                    key_type = key_type_names.get(key_id, f"key_id={key_id}")
+                    log_manager.info(
+                        frame_id, "ciphering",
+                        f"使用密钥类型: {key_type}"
+                    )
 
                     if cipher_frame.decrypt_success:
                         log_manager.info(
@@ -274,9 +322,22 @@ def build_frame(
     encrypt: bool = False,
     encryption_key: Optional[str] = None,
     system_title: Optional[str] = None,
+    guek: Optional[str] = None,
+    gubk: Optional[str] = None,
+    ak: Optional[str] = None,
+    kek: Optional[str] = None,
+    invocation_counter: int = 1,
+    key_id: int = 0,
 ) -> dict:
     """
     构建DLMS帧
+
+    支持多种DLMS密钥类型：
+    - guek: Global Unicast Encryption Key（全局单播加密密钥，默认使用）
+    - gubk: Global Unicast Broadcast Key（广播密钥）
+    - ak: Authentication Key（认证密钥）
+    - kek: Key Encryption Key（密钥加密密钥）
+    - encryption_key: 兼容别名，映射到 guek
 
     Args:
         apdu_type: APDU类型
@@ -284,35 +345,65 @@ def build_frame(
         src_wport: 源WPort
         dst_wport: 目的WPort
         encrypt: 是否加密
-        encryption_key: 加密密钥（十六进制）
+        encryption_key: 加密密钥（十六进制，兼容别名，映射到guek）
         system_title: 系统标题（十六进制）
+        guek: Global Unicast Encryption Key（十六进制）
+        gubk: Global Unicast Broadcast Key（十六进制）
+        ak: Authentication Key（十六进制）
+        kek: Key Encryption Key（十六进制）
+        invocation_counter: 调用计数器
+        key_id: 密钥标识 (0=unicast/GUEK, 1=broadcast/GUBK, 2=system)
 
     Returns:
         dict: {success, hex_data, frame_length, message}
     """
     try:
+        # 构建密钥字典
+        effective_guek = guek or encryption_key
+        keys_dict: Dict[str, Optional[bytes]] = {}
+        if effective_guek:
+            keys_dict["guek"] = hex_to_bytes(effective_guek)
+        if gubk:
+            keys_dict["gubk"] = hex_to_bytes(gubk)
+        if ak:
+            keys_dict["ak"] = hex_to_bytes(ak)
+        if kek:
+            keys_dict["kek"] = hex_to_bytes(kek)
+
         # Step 1: 构建APDU
         apdu_data = build_apdu(apdu_type, params)
 
         # Step 2: 加密（可选）
         if encrypt:
-            if not encryption_key or not system_title:
+            if not keys_dict or not system_title:
+                key_type_names = {0: "GUEK", 1: "GUBK", 2: "System Key"}
+                required_key = key_type_names.get(key_id, "GUEK")
                 return {
                     "success": False,
                     "hex_data": "",
                     "frame_length": 0,
-                    "message": "加密需要提供密钥和系统标题",
+                    "message": f"加密需要提供{required_key}密钥和系统标题",
                 }
-            key_bytes = hex_to_bytes(encryption_key)
             st_bytes = hex_to_bytes(system_title)
-            # TODO: 调用加密层
-            # apdu_data = build_ciphered(apdu_data, key_bytes, st_bytes, invocation_counter=1)
-            return {
-                "success": False,
-                "hex_data": "",
-                "frame_length": 0,
-                "message": "加密组帧暂未完全实现",
-            }
+            try:
+                apdu_data = build_ciphered(
+                    apdu_data,
+                    key=keys_dict.get("guek"),
+                    system_title=st_bytes,
+                    invocation_counter=invocation_counter,
+                    encrypted=True,
+                    authenticated=True,
+                    compressed=False,
+                    key_id=key_id,
+                    keys=keys_dict if len(keys_dict) > 1 else None,
+                )
+            except Exception as e:
+                return {
+                    "success": False,
+                    "hex_data": "",
+                    "frame_length": 0,
+                    "message": f"加密失败: {e}",
+                }
 
         # Step 3: Wrapper封装
         frame = build_wpd(apdu_data, src_wport=src_wport, dst_wport=dst_wport)

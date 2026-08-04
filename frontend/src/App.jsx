@@ -8,6 +8,7 @@ import ParserPage from './pages/ParserPage.jsx'
 import DataModelPage from './pages/DataModelPage.jsx'
 import StreamPage from './pages/StreamPage.jsx'
 import LogsPage from './pages/LogsPage.jsx'
+import PullPresetsPage from './pages/PullPresetsPage.jsx'
 
 const { Content } = Layout
 
@@ -46,6 +47,7 @@ function App() {
                 <Route path="/datamodel" element={<DataModelPage />} />
                 <Route path="/stream" element={<StreamPage />} />
                 <Route path="/logs" element={<LogsPage />} />
+                <Route path="/pull-presets" element={<PullPresetsPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </MainContent>

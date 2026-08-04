@@ -1,75 +1,212 @@
 import { create } from 'zustand'
+import {
+  uploadDataModel,
+  getDataModelList,
+  searchDataModel,
+  getDataModelClasses,
+  getDataModelStatus,
+  getObjectDetail
+} from '../services/datamodel.js'
 
 const useDataModelStore = create((set, get) => ({
-  // 是否加载
-  loaded: false,
+  // 数据模型是否已加载
+  isLoaded: false,
+  // 源文件名
+  sourceFile: null,
+  // 总对象数
+  totalObjects: 0,
 
-  // 数模列表
-  dataModels: [],
-
-  // 当前活动数模
-  activeDataModel: null,
-
-  // 对象列表
+  // 对象列表（对象标题行，attribute_id=0）
   objects: [],
+  // 类ID列表
+  classes: [],
+  // 当前选中的类过滤
+  selectedClassId: null,
 
-  // 选中的对象
+  // 选中的对象基本信息
   selectedObject: null,
+  // 选中对象的完整详情（含属性和方法）
+  selectedObjectDetail: null,
 
   // 搜索关键词
   searchQuery: '',
+  // 是否处于搜索模式
+  isSearching: false,
 
   // 加载状态
   loading: false,
+  uploading: false,
+  uploadProgress: 0,
+  detailLoading: false,
   error: null,
 
-  // Actions
-  setLoaded: (loaded) => set({ loaded }),
-
-  setDataModels: (models) => set({ dataModels: models }),
-
-  setActiveDataModel: (model) => set({ activeDataModel: model }),
-
-  setObjects: (objects) => set({ objects }),
-
-  setSelectedObject: (obj) => set({ selectedObject: obj }),
-
+  // ---- 基础 setters ----
   setSearchQuery: (query) => set({ searchQuery: query }),
-
-  setLoading: (loading) => set({ loading }),
-
+  setSelectedClassId: (classId) => set({ selectedClassId: classId }),
   setError: (error) => set({ error }),
 
-  addDataModel: (model) => set((state) => ({
-    dataModels: [...state.dataModels, model]
-  })),
-
-  removeDataModel: (id) => set((state) => ({
-    dataModels: state.dataModels.filter((m) => m.id !== id)
-  })),
-
-  loadDataModel: async (loadFn, id = null) => {
-    set({ loading: true, error: null })
+  // ---- 加载状态检查 ----
+  async checkStatus() {
     try {
-      const result = id ? await loadFn(id) : await loadFn()
+      const result = await getDataModelStatus()
       set({
-        loaded: true,
-        loading: false
+        isLoaded: result.loaded,
+        totalObjects: result.total_objects,
+        sourceFile: result.source_file,
+        classes: result.classes || []
       })
       return result
-    } catch (error) {
-      set({ loading: false, error: error.message })
-      throw error
+    } catch (err) {
+      // 404 表示未加载，这是正常情况
+      if (err.status !== 404) {
+        set({ error: err.message })
+      }
+      return null
     }
   },
 
-  reset: () => set({
-    loaded: false,
-    objects: [],
-    selectedObject: null,
-    searchQuery: '',
-    error: null
-  })
+  // ---- 上传数模 ----
+  async uploadFile(file) {
+    set({ uploading: true, uploadProgress: 0, error: null })
+    try {
+      const result = await uploadDataModel(file, (progressEvent) => {
+        const percentCompleted = Math.round(
+          (progressEvent.loaded * 100) / progressEvent.total
+        )
+        set({ uploadProgress: percentCompleted })
+      })
+
+      set({
+        uploading: false,
+        uploadProgress: 100,
+        isLoaded: true,
+        totalObjects: result.total_objects,
+        classes: result.classes || [],
+        sourceFile: file.name
+      })
+
+      // 上传成功后加载对象列表
+      await get().loadObjects()
+
+      return result
+    } catch (err) {
+      set({ uploading: false, uploadProgress: 0, error: err.message })
+      throw err
+    }
+  },
+
+  // ---- 加载对象列表 ----
+  async loadObjects(params = {}) {
+    set({ loading: true, error: null })
+    try {
+      const state = get()
+      const queryParams = {
+        limit: params.limit || 200,
+        offset: params.offset || 0
+      }
+      if (state.selectedClassId) {
+        queryParams.class_id = state.selectedClassId
+      }
+
+      const result = await getDataModelList(queryParams)
+
+      // 过滤出对象本身（attribute_id=0 或 attribute_id=null）
+      // 后端返回的是扁平列表，我们只取 attribute_id=0 的对象作为列表项
+      const objectHeaders = result.filter(
+        (obj) => obj.attribute_id === 0 || obj.attribute_id === null
+      )
+
+      set({
+        objects: objectHeaders,
+        loading: false,
+        isSearching: false
+      })
+
+      return objectHeaders
+    } catch (err) {
+      set({ loading: false, error: err.message })
+      throw err
+    }
+  },
+
+  // ---- 搜索对象 ----
+  async search(keyword) {
+    if (!keyword || !keyword.trim()) {
+      // 清空搜索，重新加载列表
+      await get().loadObjects()
+      return
+    }
+
+    set({ loading: true, error: null, isSearching: true })
+    try {
+      const state = get()
+      const result = await searchDataModel(keyword, state.selectedClassId)
+
+      // 过滤出对象本身（attribute_id=0）
+      const objectHeaders = result.results.filter(
+        (obj) => obj.attribute_id === 0 || obj.attribute_id === null
+      )
+
+      set({
+        objects: objectHeaders,
+        loading: false
+      })
+
+      return objectHeaders
+    } catch (err) {
+      set({ loading: false, error: err.message })
+      throw err
+    }
+  },
+
+  // ---- 加载类ID列表 ----
+  async loadClasses() {
+    try {
+      const result = await getDataModelClasses()
+      set({ classes: result.classes || [] })
+      return result.classes
+    } catch (err) {
+      if (err.status !== 404) {
+        set({ error: err.message })
+      }
+      return []
+    }
+  },
+
+  // ---- 选择对象并加载详情 ----
+  async selectObject(obj) {
+    set({ selectedObject: obj, selectedObjectDetail: null, detailLoading: true, error: null })
+    try {
+      const detail = await getObjectDetail(obj.class_id, obj.obis)
+      set({ selectedObjectDetail: detail, detailLoading: false })
+      return detail
+    } catch (err) {
+      set({ detailLoading: false, error: err.message })
+      // 即使详情加载失败，也保留基本选中状态
+      return null
+    }
+  },
+
+  // ---- 重置 ----
+  reset() {
+    set({
+      isLoaded: false,
+      sourceFile: null,
+      totalObjects: 0,
+      objects: [],
+      classes: [],
+      selectedClassId: null,
+      selectedObject: null,
+      selectedObjectDetail: null,
+      searchQuery: '',
+      isSearching: false,
+      loading: false,
+      uploading: false,
+      uploadProgress: 0,
+      detailLoading: false,
+      error: null
+    })
+  }
 }))
 
 export default useDataModelStore

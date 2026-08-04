@@ -1,14 +1,246 @@
-import { Row, Col, Card, Space, Divider, Typography } from 'antd'
-import { SecurityScanOutlined } from '@ant-design/icons'
+import { useState } from 'react'
+import { Row, Col, Card, Space, Divider, Typography, Collapse, Select, InputNumber, Checkbox, Tooltip, Input } from 'antd'
+import {
+  SecurityScanOutlined,
+  DownOutlined,
+  UpOutlined,
+  KeyOutlined,
+  SafetyCertificateOutlined,
+  LockOutlined,
+  UnlockOutlined
+} from '@ant-design/icons'
 import HexInput from '../components/parser/HexInput.jsx'
 import ParseControls from '../components/parser/ParseControls.jsx'
 import LayerView from '../components/parser/LayerView.jsx'
 import useParserStore from '../store/parserStore.js'
 
 const { Title, Text } = Typography
+const { Panel } = Collapse
+const { Option } = Select
+const { Password } = Input
+
+// 密钥类型选项
+const KEY_TYPE_OPTIONS = [
+  { value: 'guek', label: 'GUEK (单播加密密钥)' },
+  { value: 'gubk', label: 'GUBK (广播密钥)' },
+  { value: 'custom', label: '自定义' }
+]
+
+// 密钥字段配置
+const KEY_FIELDS = [
+  {
+    key: 'guek',
+    label: 'GUEK',
+    fullName: 'Global Unicast Encryption Key',
+    description: '全局单播加密密钥，用于单播通信加密解密',
+    placeholder: '输入GUEK密钥（十六进制）'
+  },
+  {
+    key: 'gubk',
+    label: 'GUBK',
+    fullName: 'Global Unicast Broadcast Key',
+    description: '广播密钥，用于广播通信加密解密',
+    placeholder: '输入GUBK密钥（十六进制）'
+  },
+  {
+    key: 'ak',
+    label: 'AK',
+    fullName: 'Authentication Key',
+    description: '认证密钥，用于消息认证',
+    placeholder: '输入AK认证密钥（十六进制）'
+  },
+  {
+    key: 'kek',
+    label: 'KEK',
+    fullName: 'Key Encryption Key',
+    description: '密钥加密密钥，用于加密保护其他密钥',
+    placeholder: '输入KEK密钥加密密钥（十六进制）'
+  }
+]
+
+function SecurityConfigPanel() {
+  const { securityConfig, updateSecurityConfig, securityPanelExpanded, toggleSecurityPanel } = useParserStore()
+
+  const handleKeyTypeChange = (value) => {
+    updateSecurityConfig({ selectedKeyType: value })
+  }
+
+  const handleKeyChange = (field, value) => {
+    updateSecurityConfig({ [field]: value })
+  }
+
+  const handleCheckboxChange = (field, checked) => {
+    updateSecurityConfig({ [field]: checked })
+  }
+
+  const genExtra = () => (
+    <span
+      onClick={(e) => {
+        e.stopPropagation()
+        toggleSecurityPanel()
+      }}
+      style={{ cursor: 'pointer' }}
+    >
+      {securityPanelExpanded ? <UpOutlined /> : <DownOutlined />}
+    </span>
+  )
+
+  return (
+    <Collapse
+      activeKey={securityPanelExpanded ? ['security'] : []}
+      onChange={() => toggleSecurityPanel()}
+      ghost
+      style={{ background: 'transparent' }}
+    >
+      <Panel
+        header={
+          <Space align="center">
+            <SecurityScanOutlined />
+            <Text strong>安全配置</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              ({KEY_FIELDS.filter(f => securityConfig[f.key]).length} 个密钥已配置)
+            </Text>
+          </Space>
+        }
+        key="security"
+        extra={genExtra()}
+        style={{ border: 'none' }}
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          {/* 密钥类型选择 */}
+          <div>
+            <Space.Compact style={{ width: '100%' }}>
+              <span style={{
+                width: 100,
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: 13
+              }}>
+                <KeyOutlined style={{ marginRight: 4 }} />
+                密钥类型:
+              </span>
+              <Select
+                value={securityConfig.selectedKeyType}
+                onChange={handleKeyTypeChange}
+                style={{ flex: 1 }}
+                size="small"
+                options={KEY_TYPE_OPTIONS}
+              />
+            </Space.Compact>
+          </div>
+
+          {/* 密钥输入区域 */}
+          <div style={{
+            padding: '8px 12px',
+            background: '#fafafa',
+            borderRadius: 6,
+            border: '1px solid #f0f0f0'
+          }}>
+            <Space direction="vertical" size="small" style={{ width: '100%' }}>
+              {KEY_FIELDS.map((field) => {
+                // 根据选中的密钥类型决定显示哪些字段
+                const isSelectedType = securityConfig.selectedKeyType === field.key
+                const showField = securityConfig.selectedKeyType === 'custom' ||
+                  field.key === 'guek' ||
+                  field.key === securityConfig.selectedKeyType
+
+                if (!showField) return null
+
+                return (
+                  <Tooltip
+                    key={field.key}
+                    title={`${field.fullName} - ${field.description}`}
+                    placement="right"
+                  >
+                    <Space.Compact style={{ width: '100%' }}>
+                      <span style={{
+                        width: 80,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        fontSize: 12,
+                        fontWeight: isSelectedType ? 600 : 400,
+                        color: isSelectedType ? '#1677ff' : 'inherit'
+                      }}>
+                        {field.label}:
+                      </span>
+                      <Password
+                        value={securityConfig[field.key]}
+                        onChange={(e) => handleKeyChange(field.key, e.target.value)}
+                        placeholder={field.placeholder}
+                        size="small"
+                        style={{ flex: 1 }}
+                        iconRender={(visible) => (visible ? <UnlockOutlined /> : <LockOutlined />)}
+                      />
+                    </Space.Compact>
+                  </Tooltip>
+                )
+              })}
+            </Space>
+          </div>
+
+          {/* System Title 和 Invocation Counter */}
+          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            <Space.Compact style={{ width: '100%' }}>
+              <span style={{
+                width: 100,
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: 13
+              }}>
+                <SafetyCertificateOutlined style={{ marginRight: 4 }} />
+                System Title:
+              </span>
+              <Input
+                value={securityConfig.systemTitle}
+                onChange={(e) => updateSecurityConfig({ systemTitle: e.target.value })}
+                placeholder="系统标题（十六进制，8字节）"
+                size="small"
+                style={{ flex: 1 }}
+              />
+            </Space.Compact>
+
+            <Space.Compact style={{ width: '100%' }}>
+              <span style={{
+                width: 100,
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: 13
+              }}>
+                Invocation Counter:
+              </span>
+              <InputNumber
+                value={securityConfig.invocationCounter}
+                onChange={(value) => updateSecurityConfig({ invocationCounter: value || 0 })}
+                min={0}
+                size="small"
+                style={{ flex: 1 }}
+              />
+            </Space.Compact>
+          </Space>
+
+          {/* 启用加密 / 启用压缩 */}
+          <Space style={{ width: '100%', justifyContent: 'space-around' }}>
+            <Checkbox
+              checked={securityConfig.useCiphering}
+              onChange={(e) => handleCheckboxChange('useCiphering', e.target.checked)}
+            >
+              启用加密
+            </Checkbox>
+            <Checkbox
+              checked={securityConfig.useCompression}
+              onChange={(e) => handleCheckboxChange('useCompression', e.target.checked)}
+            >
+              启用压缩
+            </Checkbox>
+          </Space>
+        </Space>
+      </Panel>
+    </Collapse>
+  )
+}
 
 function ParserPage() {
-  const { securityConfig, updateSecurityConfig, direction } = useParserStore()
+  const { direction } = useParserStore()
 
   return (
     <div className="page-container">
@@ -37,68 +269,7 @@ function ParserPage() {
             <Divider style={{ margin: '16px 0' }} />
 
             {/* 安全配置面板 */}
-            <div>
-              <Space align="center" style={{ marginBottom: 12 }}>
-                <SecurityScanOutlined />
-                <Text strong>安全配置</Text>
-              </Space>
-              <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                <Space.Compact style={{ width: '100%' }}>
-                  <span style={{ width: 100, display: 'inline-flex', alignItems: 'center' }}>
-                    密钥:
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="Block Cipher Key"
-                    value={securityConfig.blockCipherKey}
-                    onChange={(e) => updateSecurityConfig({ blockCipherKey: e.target.value })}
-                    style={{ flex: 1, padding: '4px 8px', border: '1px solid #d9d9d9', borderRadius: 4 }}
-                  />
-                </Space.Compact>
-                <Space.Compact style={{ width: '100%' }}>
-                  <span style={{ width: 100, display: 'inline-flex', alignItems: 'center' }}>
-                    System Title:
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="System Title"
-                    value={securityConfig.systemTitle}
-                    onChange={(e) => updateSecurityConfig({ systemTitle: e.target.value })}
-                    style={{ flex: 1, padding: '4px 8px', border: '1px solid #d9d9d9', borderRadius: 4 }}
-                  />
-                </Space.Compact>
-                <Space.Compact style={{ width: '100%' }}>
-                  <span style={{ width: 100, display: 'inline-flex', alignItems: 'center' }}>
-                    计数器:
-                  </span>
-                  <input
-                    type="number"
-                    placeholder="Invocation Counter"
-                    value={securityConfig.invocationCounter}
-                    onChange={(e) => updateSecurityConfig({ invocationCounter: parseInt(e.target.value) || 0 })}
-                    style={{ flex: 1, padding: '4px 8px', border: '1px solid #d9d9d9', borderRadius: 4 }}
-                  />
-                </Space.Compact>
-                <Space>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="checkbox"
-                      checked={securityConfig.useCiphering}
-                      onChange={(e) => updateSecurityConfig({ useCiphering: e.target.checked })}
-                    />
-                    启用加密
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input
-                      type="checkbox"
-                      checked={securityConfig.useCompression}
-                      onChange={(e) => updateSecurityConfig({ useCompression: e.target.checked })}
-                    />
-                    启用压缩
-                  </label>
-                </Space>
-              </Space>
-            </div>
+            <SecurityConfigPanel />
           </Card>
         </Col>
 

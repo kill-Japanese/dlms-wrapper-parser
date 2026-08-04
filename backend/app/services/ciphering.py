@@ -17,7 +17,7 @@ DLMS/COSEM 安全加密使用 AES-GCM 算法
 - Ciphered Text (variable): 密文
 - GMAC Tag (12 bytes if authenticated): GMAC认证标签
 """
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
@@ -28,6 +28,40 @@ from app.utils.hex_utils import bytes_to_hex, hex_to_bytes
 class CipheringError(Exception):
     """加解密异常"""
     pass
+
+
+# 密钥ID常量
+KEY_ID_UNICAST = 0    # GUEK - Global Unicast Encryption Key
+KEY_ID_BROADCAST = 1  # GUBK - Global Unicast Broadcast Key
+KEY_ID_SYSTEM = 2     # 系统密钥（暂用GUEK）
+
+
+def select_key_by_id(key_id: int, keys: Dict[str, Optional[bytes]]) -> Optional[bytes]:
+    """
+    根据 key_id 选择对应的密钥
+
+    Args:
+        key_id: 密钥标识 (0=unicast, 1=broadcast, 2=system)
+        keys: 密钥字典，包含 guek, gubk, ak, kek 等
+
+    Returns:
+        选中的密钥字节，或 None
+
+    密钥映射:
+        key_id=0 (unicast)   -> GUEK
+        key_id=1 (broadcast) -> GUBK
+        key_id=2 (system)    -> 系统密钥（暂用GUEK）
+    """
+    if key_id == KEY_ID_UNICAST:
+        return keys.get("guek")
+    elif key_id == KEY_ID_BROADCAST:
+        return keys.get("gubk")
+    elif key_id == KEY_ID_SYSTEM:
+        # 系统密钥暂用GUEK
+        return keys.get("guek")
+    else:
+        # 默认使用GUEK
+        return keys.get("guek")
 
 
 def _parse_security_control(sc_byte: int) -> CipherInfo:
@@ -93,7 +127,11 @@ def _derive_gcm_key(key: bytes) -> bytes:
         return key + b'\x00' * (16 - len(key))
 
 
-def parse_ciphered(data: bytes, key: Optional[bytes] = None) -> Tuple[bytes, CipherFrame]:
+def parse_ciphered(
+    data: bytes,
+    key: Optional[bytes] = None,
+    keys: Optional[Dict[str, Optional[bytes]]] = None,
+) -> Tuple[bytes, CipherFrame]:
     """
     解析加密帧，尝试解密
 
@@ -102,7 +140,9 @@ def parse_ciphered(data: bytes, key: Optional[bytes] = None) -> Tuple[bytes, Cip
 
     Args:
         data: 加密帧数据（从安全控制字节开始）
-        key: 解密密钥（16字节AES-128密钥）
+        key: 解密密钥（16字节AES-128密钥，向后兼容参数）
+        keys: 密钥字典，包含 guek, gubk, ak, kek 等
+              当提供 keys 时，会根据 key_id 自动选择密钥
 
     Returns:
         (plaintext_apdu, CipherFrame): 解密后的APDU数据和加密帧信息
@@ -146,13 +186,24 @@ def parse_ciphered(data: bytes, key: Optional[bytes] = None) -> Tuple[bytes, Cip
         gmac_tag = ciphered_data[-12:]
         ciphered_data = ciphered_data[:-12]
 
-    # 5. 尝试解密
+    # 5. 选择解密密钥
+    # 如果提供了 keys 字典，根据 key_id 选择对应密钥
+    active_key = key
+    active_key_name = "default"
+    if keys is not None:
+        selected_key = select_key_by_id(cipher_info.key_id, keys)
+        if selected_key is not None:
+            active_key = selected_key
+            key_id_names = {0: "GUEK (unicast)", 1: "GUBK (broadcast)", 2: "System Key"}
+            active_key_name = key_id_names.get(cipher_info.key_id, f"key_id={cipher_info.key_id}")
+
+    # 6. 尝试解密
     decrypt_success = False
     plaintext = b""
 
-    if cipher_info.encrypted and key is not None:
+    if cipher_info.encrypted and active_key is not None:
         try:
-            gcm_key = _derive_gcm_key(key)
+            gcm_key = _derive_gcm_key(active_key)
             aesgcm = AESGCM(gcm_key)
 
             # 构建nonce: system_title + invocation_counter
@@ -204,26 +255,29 @@ def parse_ciphered(data: bytes, key: Optional[bytes] = None) -> Tuple[bytes, Cip
 
 def build_ciphered(
     apdu: bytes,
-    key: bytes,
-    system_title: bytes,
-    invocation_counter: int,
+    key: Optional[bytes] = None,
+    system_title: bytes = b"",
+    invocation_counter: int = 1,
     encrypted: bool = True,
     authenticated: bool = True,
     compressed: bool = False,
     key_id: int = 0,
+    keys: Optional[Dict[str, Optional[bytes]]] = None,
 ) -> bytes:
     """
     构建加密帧
 
     Args:
         apdu: 明文APDU数据
-        key: 加密密钥（16字节）
+        key: 加密密钥（16字节，向后兼容）
         system_title: 系统标题（8字节）
         invocation_counter: 调用计数器
         encrypted: 是否加密
         authenticated: 是否认证
         compressed: 是否压缩
         key_id: 密钥标识 (0-3)
+        keys: 密钥字典，包含 guek, gubk, ak, kek 等
+              当提供 keys 时，会根据 key_id 自动选择密钥
 
     Returns:
         bytes: 加密帧数据（包含安全控制字节、系统标题、调用计数器、密文、GMAC tag）
@@ -231,6 +285,13 @@ def build_ciphered(
     Raises:
         CipheringError: 加密失败
     """
+    # 选择加密密钥
+    active_key = key
+    if keys is not None:
+        selected_key = select_key_by_id(key_id, keys)
+        if selected_key is not None:
+            active_key = selected_key
+
     cipher_info = CipherInfo(
         encrypted=encrypted,
         authenticated=authenticated,
@@ -254,7 +315,10 @@ def build_ciphered(
 
     # 使用AES-GCM加密
     try:
-        gcm_key = _derive_gcm_key(key)
+        if active_key is None:
+            raise CipheringError("加密需要提供密钥")
+
+        gcm_key = _derive_gcm_key(active_key)
         aesgcm = AESGCM(gcm_key)
 
         # nonce = system_title(8) + invocation_counter(4) = 12 bytes
@@ -279,6 +343,8 @@ def build_ciphered(
 
         return result
 
+    except CipheringError:
+        raise
     except Exception as e:
         raise CipheringError(f"加密失败: {e}") from e
 

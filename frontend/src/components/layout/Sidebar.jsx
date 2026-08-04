@@ -5,7 +5,8 @@ import {
   DatabaseOutlined,
   ThunderboltOutlined,
   FileTextOutlined,
-  ExperimentOutlined
+  ExperimentOutlined,
+  RocketOutlined
 } from '@ant-design/icons'
 
 const { Sider } = Layout
@@ -30,6 +31,11 @@ const menuItems = [
     key: '/logs',
     icon: <FileTextOutlined />,
     label: '日志'
+  },
+  {
+    key: '/pull-presets',
+    icon: <RocketOutlined />,
+    label: '预设Pull'
   }
 ]
 

@@ -6,7 +6,7 @@ import {
   ClearOutlined
 } from '@ant-design/icons'
 import useParserStore from '../../store/parserStore.js'
-import { parseWrapper, packWrapper } from '../../services/parser.js'
+import { parseHex, buildFrame } from '../../services/parser.js'
 
 function ParseControls() {
   const {
@@ -29,59 +29,24 @@ function ParseControls() {
 
     setLoading(true)
     try {
-      // 模拟解析过程
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      // 调用后端解析API，传递所有安全配置参数
+      const result = await parseHex(rawHex, securityConfig)
 
-      // 模拟解析结果
-      const mockResult = {
-        success: true,
-        wrapper: {
-          version: 1,
-          srcWPort: 1,
-          dstWPort: 16,
-          length: 256,
-          header: 'E6E700'
-        },
-        cipher: {
-          enabled: securityConfig.useCiphering,
-          securityControl: '10',
-          systemTitle: securityConfig.systemTitle || '534D535800000000',
-          invocationCounter: securityConfig.invocationCounter || 1,
-          keyId: 0,
-          decrypted: securityConfig.useCiphering
-        },
-        compression: {
-          enabled: securityConfig.useCompression,
-          algorithm: 'gzip',
-          originalSize: 320,
-          compressedSize: 208,
-          ratio: 0.65
-        },
-        apdu: {
-          type: 'GET-RESPONSE',
-          data: {
-            invokeId: 1,
-            result: 'success',
-            data: {
-              type: 'structure',
-              value: [
-                { type: 'long-unsigned', value: 1, name: 'Attribute' },
-                { type: 'double-long-unsigned', value: 12345, name: 'Value' }
-              ]
-            }
-          }
-        }
-      }
-
-      setParseResult(mockResult)
+      setParseResult(result)
       addToHistory({
-        hex: rawHex.substring(0, 50) + '...',
+        hex: rawHex.substring(0, 50) + (rawHex.length > 50 ? '...' : ''),
         direction,
         success: true
       })
-      message.success('解析成功')
+
+      if (result.errors && result.errors.length > 0) {
+        message.warning(`解析完成，但有 ${result.errors.length} 个警告`)
+      } else {
+        message.success('解析成功')
+      }
     } catch (error) {
       message.error(error.message || '解析失败')
+      console.error('Parse error:', error)
     } finally {
       setLoading(false)
     }
@@ -95,11 +60,41 @@ function ParseControls() {
 
     setLoading(true)
     try {
-      // 模拟打包过程
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      message.success('打包成功')
+      // 调用后端组帧API
+      const result = await buildFrame(
+        'DataNotification',
+        {},
+        {
+          srcWPort: 1,
+          dstWPort: 16,
+          encrypt: securityConfig.useCiphering,
+          guek: securityConfig.guek,
+          gubk: securityConfig.gubk,
+          ak: securityConfig.ak,
+          kek: securityConfig.kek,
+          systemTitle: securityConfig.systemTitle,
+          invocationCounter: securityConfig.invocationCounter,
+          keyId: securityConfig.selectedKeyType === 'gubk' ? 1 : 0
+        }
+      )
+
+      if (result.success) {
+        message.success('打包成功')
+        setParseResult({
+          raw_hex: result.hex_data,
+          frame_length: result.frame_length
+        })
+        addToHistory({
+          hex: result.hex_data.substring(0, 50) + (result.hex_data.length > 50 ? '...' : ''),
+          direction,
+          success: true
+        })
+      } else {
+        message.error(result.message || '打包失败')
+      }
     } catch (error) {
       message.error(error.message || '打包失败')
+      console.error('Pack error:', error)
     } finally {
       setLoading(false)
     }

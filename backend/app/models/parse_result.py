@@ -50,23 +50,58 @@ class ParseResult(BaseModel):
 
 
 class ParseRequest(BaseModel):
-    """解析请求模型"""
+    """解析请求模型
+
+    支持多种DLMS密钥类型：
+    - guek: Global Unicast Encryption Key（全局单播加密密钥，默认使用）
+    - gubk: Global Unicast Broadcast Key（广播密钥）
+    - ak: Authentication Key（认证密钥）
+    - kek: Key Encryption Key（密钥加密密钥）
+    - encryption_key: 兼容别名，映射到 guek
+    """
 
     hex_data: str = Field(description="十六进制帧数据")
-    encryption_key: Optional[str] = Field(default=None, description="加密密钥（可选，十六进制）")
+    encryption_key: Optional[str] = Field(default=None, description="加密密钥（兼容别名，映射到guek，十六进制）")
+    guek: Optional[str] = Field(default=None, description="Global Unicast Encryption Key - 全局单播加密密钥（十六进制）")
+    gubk: Optional[str] = Field(default=None, description="Global Unicast Broadcast Key - 广播密钥（十六进制）")
+    ak: Optional[str] = Field(default=None, description="Authentication Key - 认证密钥（十六进制）")
+    kek: Optional[str] = Field(default=None, description="Key Encryption Key - 密钥加密密钥（十六进制）")
     system_title: Optional[str] = Field(default=None, description="系统标题（可选，十六进制）")
+    invocation_counter: Optional[int] = Field(default=None, description="调用计数器（可选）")
+
+    def get_effective_guek(self) -> Optional[str]:
+        """获取有效的GUEK密钥（优先使用guek字段，兼容encryption_key）"""
+        return self.guek or self.encryption_key
 
 
 class BuildRequest(BaseModel):
-    """组帧请求模型"""
+    """组帧请求模型
+
+    支持多种DLMS密钥类型：
+    - guek: Global Unicast Encryption Key（全局单播加密密钥，默认使用）
+    - gubk: Global Unicast Broadcast Key（广播密钥）
+    - ak: Authentication Key（认证密钥）
+    - kek: Key Encryption Key（密钥加密密钥）
+    - encryption_key: 兼容别名，映射到 guek
+    """
 
     apdu_type: str = Field(description="APDU类型")
     params: dict = Field(default_factory=dict, description="APDU参数")
     src_wport: int = Field(default=1, description="源WPort")
     dst_wport: int = Field(default=16, description="目的WPort")
     encrypt: bool = Field(default=False, description="是否加密")
-    encryption_key: Optional[str] = Field(default=None, description="加密密钥")
-    system_title: Optional[str] = Field(default=None, description="系统标题")
+    encryption_key: Optional[str] = Field(default=None, description="加密密钥（兼容别名，映射到guek）")
+    guek: Optional[str] = Field(default=None, description="Global Unicast Encryption Key - 全局单播加密密钥（十六进制）")
+    gubk: Optional[str] = Field(default=None, description="Global Unicast Broadcast Key - 广播密钥（十六进制）")
+    ak: Optional[str] = Field(default=None, description="Authentication Key - 认证密钥（十六进制）")
+    kek: Optional[str] = Field(default=None, description="Key Encryption Key - 密钥加密密钥（十六进制）")
+    system_title: Optional[str] = Field(default=None, description="系统标题（十六进制）")
+    invocation_counter: Optional[int] = Field(default=1, description="调用计数器")
+    key_id: int = Field(default=0, description="密钥标识 (0=unicast/GUEK, 1=broadcast/GUBK, 2=system)")
+
+    def get_effective_guek(self) -> Optional[str]:
+        """获取有效的GUEK密钥（优先使用guek字段，兼容encryption_key）"""
+        return self.guek or self.encryption_key
 
 
 class BuildResponse(BaseModel):

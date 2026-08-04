@@ -10,6 +10,7 @@ from app.models.datamodel import (
     CosemObject,
     DataModelUploadResponse,
     DataModelSearchResponse,
+    CosemObjectDetail,
 )
 from app.services.datamodel import data_model_manager
 from app.config import settings
@@ -173,4 +174,24 @@ async def match_obis(
     result = data_model_manager.match_obis(class_id, obis_bytes, attribute_id)
     if not result:
         raise HTTPException(status_code=404, detail="未找到匹配的对象")
+    return result
+
+
+@router.get("/object/{class_id}/{obis}", response_model=CosemObjectDetail, summary="获取对象完整详情")
+async def get_object_detail(
+    class_id: int,
+    obis: str,
+):
+    """
+    获取单个COSEM对象的完整信息，包含所有属性和方法列表
+
+    - **class_id**: 类ID
+    - **obis**: OBIS码 (如 1-0:1.8.0.255)
+    """
+    if not data_model_manager.is_loaded:
+        raise HTTPException(status_code=404, detail="数据模型未加载，请先上传Excel文件")
+
+    result = data_model_manager.get_object_detail(class_id, obis)
+    if not result:
+        raise HTTPException(status_code=404, detail=f"未找到对象: class_id={class_id}, obis={obis}")
     return result
