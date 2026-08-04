@@ -17,6 +17,7 @@ function ParseControls() {
     setParseResult,
     setLoading,
     loading,
+    setError,
     securityConfig,
     addToHistory,
     reset,
@@ -25,6 +26,43 @@ function ParseControls() {
 
   const { addParseLog, setParseLogs } = useLogStore()
 
+  // 检查解析结果是否有效（至少 wrapper 层解析成功）
+  const hasValidParseResult = (result) => {
+    if (!result || typeof result !== 'object') {
+      return false
+    }
+    // wrapper 层是最基础的，如果连 wrapper 都没有，说明解析完全失败
+    if (!result.wrapper) {
+      return false
+    }
+    // wrapper 是空对象也不行
+    if (typeof result.wrapper === 'object' && Object.keys(result.wrapper).length === 0) {
+      return false
+    }
+    return true
+  }
+
+  // 获取解析错误详情
+  const getParseErrorMessage = (result) => {
+    if (!result || typeof result !== 'object') {
+      return '服务器返回数据格式错误'
+    }
+    // 优先使用 result 中的错误信息
+    if (result.error) {
+      return result.error
+    }
+    if (result.message) {
+      return result.message
+    }
+    if (result.errors && result.errors.length > 0) {
+      return result.errors.join('; ')
+    }
+    if (!result.wrapper) {
+      return '无法解析帧格式：Wrapper 层解析失败'
+    }
+    return '解析失败：未识别的帧格式'
+  }
+
   const handleParse = async () => {
     if (!rawHex.trim()) {
       message.warning('请先输入十六进制数据')
@@ -32,16 +70,49 @@ function ParseControls() {
     }
 
     setLoading(true)
+    setError(null)
     try {
       // 调用后端解析API，传递所有安全配置参数
       const result = await parseHex(rawHex, securityConfig)
       console.log('Parse result:', result)
-      console.log('Parse result - wrapper:', result.wrapper)
-      console.log('Parse result - ciphering:', result.ciphering)
-      console.log('Parse result - compression:', result.compression)
-      console.log('Parse result - apdu:', result.apdu)
+      console.log('Parse result - wrapper:', result?.wrapper)
+      console.log('Parse result - ciphering:', result?.ciphering)
+      console.log('Parse result - compression:', result?.compression)
+      console.log('Parse result - apdu:', result?.apdu)
 
+      // 检查解析结果是否有效
+      if (!hasValidParseResult(result)) {
+        const errorMsg = getParseErrorMessage(result)
+        console.error('Parse failed - invalid result:', result)
+
+        // 即使失败也保存结果，以便 LayerView 显示错误详情
+        setParseResult(result)
+        setError(errorMsg)
+
+        addToHistory({
+          hex: rawHex.substring(0, 50) + (rawHex.length > 50 ? '...' : ''),
+          direction,
+          success: false
+        })
+
+        // 记录错误日志
+        addParseLog({
+          level: 'error',
+          step: 'parse',
+          message: errorMsg
+        })
+
+        // 显示详细的错误信息
+        const errorDetail = result?.errors && result.errors.length > 0
+          ? `${errorMsg}\n\n错误详情：\n${result.errors.map((e, i) => `${i + 1}. ${e}`).join('\n')}`
+          : errorMsg
+        message.error(errorDetail, 5)
+        return
+      }
+
+      // 解析成功 - 保存结果
       setParseResult(result)
+      setError(null)
       addToHistory({
         hex: rawHex.substring(0, 50) + (rawHex.length > 50 ? '...' : ''),
         direction,
@@ -64,7 +135,7 @@ function ParseControls() {
       } else {
         // 如果没有详细日志，添加一条总结日志
         addParseLog({
-          level: 'info',
+          level: result.errors && result.errors.length > 0 ? 'warning' : 'info',
           step: 'complete',
           message: result.errors && result.errors.length > 0
             ? `解析完成，有 ${result.errors.length} 个警告`
@@ -72,19 +143,33 @@ function ParseControls() {
         })
       }
 
+      // 根据是否有警告显示不同消息
       if (result.errors && result.errors.length > 0) {
         message.warning(`解析完成，但有 ${result.errors.length} 个警告`)
       } else {
         message.success('解析成功')
       }
     } catch (error) {
-      message.error(error.message || '解析失败')
       console.error('Parse error:', error)
+
+      // 区分不同类型的错误
+      let errorMsg = error.message || '解析失败'
+      if (error.status === 404) {
+        errorMsg = '接口不存在，请检查后端版本是否支持解析功能'
+      } else if (error.status === 500) {
+        errorMsg = `服务器错误：${error.message || '未知错误'}`
+      } else if (!error.status) {
+        errorMsg = '无法连接到后端服务，请检查后端是否启动'
+      }
+
+      setError(errorMsg)
+      message.error(errorMsg, 5)
+
       // 记录错误日志
       addParseLog({
         level: 'error',
         step: 'parse',
-        message: error.message || '解析失败'
+        message: errorMsg
       })
     } finally {
       setLoading(false)
@@ -132,7 +217,13 @@ function ParseControls() {
         message.error(result.message || '打包失败')
       }
     } catch (error) {
-      message.error(error.message || '打包失败')
+      let errorMsg = error.message || '打包失败'
+      if (error.status === 404) {
+        errorMsg = '接口不存在，请检查后端版本'
+      } else if (!error.status) {
+        errorMsg = '无法连接到后端服务，请检查后端是否启动'
+      }
+      message.error(errorMsg, 5)
       console.error('Pack error:', error)
     } finally {
       setLoading(false)

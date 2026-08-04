@@ -16,7 +16,8 @@ import {
   Spin,
   Table,
   Tooltip,
-  Divider
+  Divider,
+  Alert
 } from 'antd'
 import {
   UploadOutlined,
@@ -25,7 +26,8 @@ import {
   ThunderboltOutlined,
   FileTextOutlined,
   CodeOutlined,
-  InfoCircleOutlined
+  InfoCircleOutlined,
+  WarningOutlined
 } from '@ant-design/icons'
 import useDataModelStore from '../store/datamodelStore.js'
 
@@ -97,17 +99,15 @@ const CLASS_NAMES = {
   102: 'S-FSK MAC Service Node',
   103: 'S-FSK MAC Switching',
   104: 'S-FSK MAC Message',
-  105: 'S-FSK MAC Hops',
-  106: 'S-FSK MAC Neighbour Table',
-  107: 'S-FSK MAC PDUE',
-  108: 'S-FSK MAC Routing',
-  109: 'S-FSK MAC Superframe',
-  110: 'S-FSK MAC Neighbour Discovery',
-  111: 'S-FSK MAC Coordinator',
-  112: 'S-FSK MAC Device',
-  113: 'S-FSK MAC Reduced',
-  114: 'S-FSK MAC Commissioning',
-  115: 'S-FSK MAC Diagnostic',
+  105: 'S-FSK MAC PDUE',
+  106: 'S-FSK MAC Routing',
+  107: 'S-FSK MAC Superframe',
+  108: 'S-FSK MAC Neighbour Discovery',
+  109: 'S-FSK MAC Coordinator',
+  110: 'S-FSK MAC Device',
+  111: 'S-FSK MAC Reduced',
+  112: 'S-FSK MAC Commissioning',
+  113: 'S-FSK MAC Diagnostic',
   120: 'Prime OFDM PHY',
   121: 'Prime OFDM MAC',
   122: 'Prime OFDM Convergence',
@@ -217,6 +217,7 @@ function DataModelPage() {
     totalObjectHeaders,
     sourceFile,
     error,
+    usingFallbackApi,
     setSearchQuery,
     setSelectedClassId,
     checkStatus,
@@ -276,7 +277,14 @@ function DataModelPage() {
       const hide = message.loading('正在上传并解析数模文件...', 0)
       await uploadFile(file)
       hide()
-      message.success(`数模文件 "${file.name}" 上传成功，已加载对象列表`)
+
+      // 检查是否有警告（如对象数为0）
+      const state = useDataModelStore.getState()
+      if (state.error) {
+        message.warning(`上传成功，但有警告：${state.error}`)
+      } else {
+        message.success(`数模文件 "${file.name}" 上传成功，已加载对象列表`)
+      }
     } catch (err) {
       message.error(`上传失败: ${err.message || '未知错误'}`)
     }
@@ -364,6 +372,10 @@ function DataModelPage() {
     }
   ]
 
+  // 获取对象计数显示
+  const objectCount = totalObjectHeaders || objects.length || 0
+  const isZeroObjects = isLoaded && objectCount === 0
+
   return (
     <div className="page-container">
       <Card
@@ -375,6 +387,11 @@ function DataModelPage() {
             </Title>
             {isLoaded && (
               <Tag color="success">已加载</Tag>
+            )}
+            {usingFallbackApi && (
+              <Tooltip title="当前使用兼容模式，后端版本较旧可能功能不全">
+                <Tag color="orange">兼容模式</Tag>
+              </Tooltip>
             )}
             {sourceFile && (
               <Tooltip title="当前加载的数模文件">
@@ -494,24 +511,58 @@ function DataModelPage() {
                     ))}
                   </Select>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      共 {totalObjectHeaders || objects.length} 个对象
+                    <Text
+                      type={isZeroObjects ? 'danger' : 'secondary'}
+                      style={{ fontSize: 12 }}
+                    >
+                      {isZeroObjects && <WarningOutlined style={{ marginRight: 4 }} />}
+                      共 {objectCount} 个对象
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
                       总条目: {totalObjects}
                     </Text>
                   </div>
+
+                  {/* 错误/警告提示 */}
+                  {error && (
+                    <Alert
+                      message={isZeroObjects ? '数据异常' : '加载错误'}
+                      description={error}
+                      type={isZeroObjects ? 'warning' : 'error'}
+                      showIcon
+                      size="small"
+                      style={{ marginTop: 4 }}
+                    />
+                  )}
+
+                  {/* 零对象时的建议 */}
+                  {isZeroObjects && !loading && (
+                    <Alert
+                      message="未加载到对象数据"
+                      description={
+                        <Space direction="vertical" size={4} style={{ fontSize: 12 }}>
+                          <span>可能的原因：</span>
+                          <ol style={{ margin: '4px 0 4px 20px', padding: 0 }}>
+                            <li>数模文件格式不正确</li>
+                            <li>后端版本不兼容（建议升级后端）</li>
+                            <li>文件中没有有效的对象定义</li>
+                          </ol>
+                          <Button size="small" type="primary" icon={<UploadOutlined />}>
+                            重新上传
+                          </Button>
+                        </Space>
+                      }
+                      type="info"
+                      showIcon
+                      size="small"
+                    />
+                  )}
                 </Space>
               </div>
 
               {/* 对象列表 */}
               <div style={{ flex: 1, overflow: 'auto' }}>
                 <Spin spinning={loading} tip="加载中...">
-                  {error && objects.length === 0 && (
-                    <div style={{ padding: '12px 16px', color: '#ff4d4f', fontSize: 12, background: '#fff2f0' }}>
-                      加载失败: {error}
-                    </div>
-                  )}
                   {objects.length > 0 ? (
                     <List
                       dataSource={objects}
@@ -554,7 +605,12 @@ function DataModelPage() {
                     />
                   ) : (
                     <Empty
-                      description={loading ? '' : '未找到匹配的对象'}
+                      description={
+                        loading ? '' :
+                          error ? '加载失败，请检查错误信息' :
+                          isZeroObjects ? '暂无对象数据' :
+                          '未找到匹配的对象'
+                      }
                       style={{ marginTop: 60 }}
                     />
                   )}

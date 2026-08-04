@@ -34,15 +34,46 @@ api.interceptors.response.use(
   (error) => {
     // 统一处理错误
     const status = error.response?.status
-    const message = error.response?.data?.message || error.message
+    const data = error.response?.data
+    const message = data?.message || data?.error || error.message
+
+    // 构造更友好的错误对象
+    const enhancedError = {
+      status,
+      message,
+      error: error,
+      data,
+      // 便捷方法：获取用户友好的错误信息
+      getUserMessage: () => {
+        if (status === 404) {
+          return '接口不存在，请检查后端版本是否支持该功能'
+        } else if (status === 500) {
+          return `服务器错误：${message || '未知错误'}`
+        } else if (status === 401) {
+          return '未授权，请重新登录'
+        } else if (status === 403) {
+          return '没有权限执行此操作'
+        } else if (status === 400) {
+          return `请求参数错误：${message || '请检查输入'}`
+        } else if (!status) {
+          return '无法连接到后端服务，请检查后端是否启动'
+        }
+        return message || '未知错误'
+      }
+    }
 
     if (status === 401) {
       // 未授权，清除token并跳转登录
       localStorage.removeItem('token')
     }
 
-    return Promise.reject({ status, message, error })
+    return Promise.reject(enhancedError)
   }
 )
+
+// 健康检查接口
+export function checkHealth() {
+  return api.get('/health')
+}
 
 export default api
