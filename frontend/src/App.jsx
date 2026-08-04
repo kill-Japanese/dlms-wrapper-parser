@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import { Layout, ConfigProvider, theme, Alert } from 'antd'
+import { Layout, ConfigProvider, theme, Alert, Button, Modal, Input, message } from 'antd'
 import { useState, useEffect } from 'react'
 import Header from './components/layout/Header.jsx'
 import Sidebar from './components/layout/Sidebar.jsx'
@@ -10,12 +10,15 @@ import StreamPage from './pages/StreamPage.jsx'
 import LogsPage from './pages/LogsPage.jsx'
 import PullPresetsPage from './pages/PullPresetsPage.jsx'
 import useAppStore from './store/appStore.js'
+import { updateBaseURL, getCurrentBaseURL } from './services/api.js'
 
 const { Content } = Layout
 
 function App() {
   const [collapsed, setCollapsed] = useState(false)
   const [darkMode, setDarkMode] = useState(false)
+  const [configModalVisible, setConfigModalVisible] = useState(false)
+  const [backendUrlInput, setBackendUrlInput] = useState('')
 
   const { backendHealth, checkBackendHealth } = useAppStore()
 
@@ -39,6 +42,26 @@ function App() {
     setDarkMode(!darkMode)
   }
 
+  const openConfigModal = () => {
+    setBackendUrlInput(getCurrentBaseURL())
+    setConfigModalVisible(true)
+  }
+
+  const handleSaveBackendUrl = async () => {
+    const url = backendUrlInput.trim().replace(/\/$/, '')
+    if (!url) {
+      message.warning('请输入后端地址')
+      return
+    }
+    updateBaseURL(url)
+    setConfigModalVisible(false)
+    message.success('后端地址已更新，正在重新检查连接...')
+    // 延迟一下再检查，确保 baseURL 已更新
+    setTimeout(() => {
+      checkBackendHealth()
+    }, 300)
+  }
+
   const isBackendUnhealthy = backendHealth.status === 'unhealthy'
 
   return (
@@ -56,7 +79,15 @@ function App() {
             description={
               <span>
                 {backendHealth.error || '无法连接到后端服务，部分功能可能无法正常使用。'}
-                {' '}请检查后端服务是否已启动，或联系管理员。
+                {' '}请检查后端服务是否已启动，或
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ padding: 0, marginLeft: 4 }}
+                  onClick={openConfigModal}
+                >
+                  配置后端地址
+                </Button>
                 {backendHealth.version && (
                   <span> (版本: {backendHealth.version})</span>
                 )}
@@ -68,6 +99,29 @@ function App() {
             style={{ margin: 0 }}
           />
         )}
+
+        {/* 后端地址配置对话框 */}
+        <Modal
+          title="配置后端服务地址"
+          open={configModalVisible}
+          onOk={handleSaveBackendUrl}
+          onCancel={() => setConfigModalVisible(false)}
+          okText="保存"
+          cancelText="取消"
+        >
+          <p style={{ marginBottom: 16 }}>
+            请输入后端服务的完整地址，例如：<code>https://dlms-parser-backend.onrender.com</code>
+          </p>
+          <Input
+            value={backendUrlInput}
+            onChange={(e) => setBackendUrlInput(e.target.value)}
+            placeholder="请输入后端服务地址"
+            onPressEnter={handleSaveBackendUrl}
+          />
+          <p style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
+            当前地址：{getCurrentBaseURL()}
+          </p>
+        </Modal>
 
         <Sidebar collapsed={collapsed} />
         <Layout>

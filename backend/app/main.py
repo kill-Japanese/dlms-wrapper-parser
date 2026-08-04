@@ -89,8 +89,9 @@ app.include_router(pull.router)
 
 
 @app.get("/health", summary="健康检查")
+@app.get("/api/health", summary="健康检查（API前缀）")
 async def health_check():
-    """健康检查接口"""
+    """健康检查接口（同时支持 /health 和 /api/health 路径）"""
     return {
         "status": "healthy",
         "app_name": settings.APP_NAME,

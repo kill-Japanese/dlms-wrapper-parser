@@ -23,7 +23,13 @@ class Settings:
     APP_VERSION: str = os.getenv("APP_VERSION", "1.0.0")
 
     # CORS配置
-    CORS_ORIGINS: list = ["*"]
+    @property
+    def CORS_ORIGINS(self) -> list:
+        """CORS允许的源，从环境变量读取，逗号分隔"""
+        origins_str = os.getenv("CORS_ORIGINS", "*")
+        if origins_str == "*":
+            return ["*"]
+        return [origin.strip() for origin in origins_str.split(",") if origin.strip()]
 
     # 上传配置
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")

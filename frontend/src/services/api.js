@@ -1,14 +1,36 @@
 import axios from 'axios'
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+// 从 localStorage 获取后端地址（如果用户手动配置过），否则使用环境变量，最后用默认值
+const getBaseURL = () => {
+  const savedUrl = localStorage.getItem('api_base_url')
+  if (savedUrl) {
+    return savedUrl
+  }
+  return import.meta.env.VITE_API_BASE_URL || '/api'
+}
 
 const api = axios.create({
-  baseURL,
+  baseURL: getBaseURL(),
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
   }
 })
+
+// 动态更新 baseURL 的方法
+export const updateBaseURL = (url) => {
+  api.defaults.baseURL = url
+  if (url) {
+    localStorage.setItem('api_base_url', url)
+  } else {
+    localStorage.removeItem('api_base_url')
+  }
+}
+
+// 获取当前 baseURL
+export const getCurrentBaseURL = () => {
+  return api.defaults.baseURL
+}
 
 // 请求拦截器
 api.interceptors.request.use(
