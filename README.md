@@ -2,6 +2,12 @@
 
 基于 Web 的 DLMS/COSEM 协议在线解析工具，支持完整的协议栈解包/打包，COSEM 数模导入，实时日志展示和双接收通道（WebSocket + HTTP）。
 
+| 文档 | 说明 |
+|------|------|
+| [快速上手](docs/QUICK_START.md) | 5 分钟快速部署和使用指南 |
+| [Render 完整部署指南](docs/RENDER_DEPLOYMENT.md) | 详细的 Render 部署步骤和常见问题 |
+| [API 文档](https://dlms-parser-backend.onrender.com/docs) | 部署后访问 /docs 查看完整 API |
+
 ## 功能特性
 
 ### 协议栈支持
