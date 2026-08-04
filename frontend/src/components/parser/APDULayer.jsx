@@ -4,8 +4,8 @@ import {
   DatabaseOutlined,
   ApiOutlined,
   NumberOutlined,
-  StringOutlined,
-  BooleanOutlined
+  FontSizeOutlined,
+  CheckCircleOutlined
 } from '@ant-design/icons'
 
 const { Text } = Typography
@@ -20,9 +20,9 @@ const typeIcons = {
   integer: <NumberOutlined style={{ color: '#faad14' }} />,
   'long-integer': <NumberOutlined style={{ color: '#faad14' }} />,
   'double-long-integer': <NumberOutlined style={{ color: '#faad14' }} />,
-  'octet-string': <StringOutlined style={{ color: '#722ed1' }} />,
-  string: <StringOutlined style={{ color: '#722ed1' }} />,
-  boolean: <BooleanOutlined style={{ color: '#13c2c2' }} />,
+  'octet-string': <FontSizeOutlined style={{ color: '#722ed1' }} />,
+  string: <FontSizeOutlined style={{ color: '#722ed1' }} />,
+  boolean: <CheckCircleOutlined style={{ color: '#13c2c2' }} />,
   'null-data': <ApiOutlined style={{ color: '#8c8c8c' }} />,
   default: <FileTextOutlined style={{ color: '#8c8c8c' }} />
 }
