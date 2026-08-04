@@ -21,18 +21,20 @@ services:
     # 后端服务的根目录（相对于仓库根目录）
     rootDir: backend
     # 构建命令：安装 Python 依赖
-    buildCommand: pip install -r requirements.txt
-    # 启动命令：使用 uvicorn 启动 FastAPI
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    # 启动命令：使用 gunicorn + uvicorn worker 启动 FastAPI（生产环境推荐）
+    startCommand: gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
     # 健康检查路径
     healthCheckPath: /health
+    # 健康检查间隔（秒）
+    healthCheckInterval: 30
     # 自动部署
     autoDeploy: yes
     # 环境变量
     envVars:
       # Python 版本
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.6
 
       # 应用配置
       - key: APP_NAME
@@ -87,7 +89,7 @@ services:
 # ============================================================
 #
 # 后端环境变量：
-# - PYTHON_VERSION: Python 版本，默认 3.11.0
+# - PYTHON_VERSION: Python 版本，默认 3.11.6
 # - APP_NAME: 应用名称
 # - APP_VERSION: 应用版本
 # - DEFAULT_ENCRYPTION_KEY: 默认加密密钥（十六进制，可选）
