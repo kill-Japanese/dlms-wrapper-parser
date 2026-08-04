@@ -50,6 +50,13 @@ class DataModelSearchResponse(BaseModel):
     total: int = Field(default=0, description="总匹配数")
 
 
+class DataModelObjectListResponse(BaseModel):
+    """对象标题行列表响应"""
+
+    objects: List[CosemObject] = Field(default_factory=list, description="对象标题行列表")
+    total: int = Field(default=0, description="对象总数（attribute_id=0的对象数）")
+
+
 class CosemAttribute(BaseModel):
     """COSEM属性"""
 

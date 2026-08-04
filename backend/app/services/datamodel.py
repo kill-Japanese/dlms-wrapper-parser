@@ -606,7 +606,7 @@ class DataModelManager:
     def get_object_list(self, class_id: Optional[int] = None,
                         limit: int = 100, offset: int = 0) -> List[CosemObject]:
         """
-        获取对象列表
+        获取对象列表（所有条目，包括属性和方法）
 
         Args:
             class_id: 按类ID过滤（None表示不过滤）
@@ -625,6 +625,35 @@ class DataModelManager:
             objects = self._all_objects
 
         return objects[offset:offset + limit]
+
+    def get_object_headers(self, class_id: Optional[int] = None,
+                           limit: int = 200, offset: int = 0) -> Tuple[List[CosemObject], int]:
+        """
+        获取对象标题行列表（仅 attribute_id=0 的对象）
+
+        用于前端对象列表展示，只返回对象本身（不含属性和方法行）。
+
+        Args:
+            class_id: 按类ID过滤（None表示不过滤）
+            limit: 返回数量限制
+            offset: 偏移量
+
+        Returns:
+            (对象标题行列表, 总数) 元组
+        """
+        if not self._loaded:
+            return [], 0
+
+        # 筛选 attribute_id=0 的对象标题行
+        if class_id is not None:
+            all_objects = self._by_class.get(class_id, [])
+        else:
+            all_objects = self._all_objects
+
+        headers = [obj for obj in all_objects if obj.attribute_id == 0]
+        total = len(headers)
+
+        return headers[offset:offset + limit], total
 
     def search(self, keyword: str, class_id: Optional[int] = None,
                limit: int = 100) -> List[CosemObject]:

@@ -35,6 +35,11 @@ function ParseControls() {
     try {
       // 调用后端解析API，传递所有安全配置参数
       const result = await parseHex(rawHex, securityConfig)
+      console.log('Parse result:', result)
+      console.log('Parse result - wrapper:', result.wrapper)
+      console.log('Parse result - ciphering:', result.ciphering)
+      console.log('Parse result - compression:', result.compression)
+      console.log('Parse result - apdu:', result.apdu)
 
       setParseResult(result)
       addToHistory({

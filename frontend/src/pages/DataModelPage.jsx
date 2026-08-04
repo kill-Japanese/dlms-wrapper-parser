@@ -214,6 +214,7 @@ function DataModelPage() {
     uploadProgress,
     detailLoading,
     totalObjects,
+    totalObjectHeaders,
     sourceFile,
     error,
     setSearchQuery,
@@ -494,7 +495,7 @@ function DataModelPage() {
                   </Select>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      共 {objects.length} 个对象
+                      共 {totalObjectHeaders || objects.length} 个对象
                     </Text>
                     <Text type="secondary" style={{ fontSize: 12 }}>
                       总条目: {totalObjects}

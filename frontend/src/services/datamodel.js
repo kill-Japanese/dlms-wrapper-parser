@@ -17,6 +17,11 @@ export function getDataModelList(params = {}) {
   return api.get('/datamodel/list', { params })
 }
 
+// 获取对象标题行列表（仅attribute_id=0的对象，用于列表展示）
+export function getObjectHeaders(params = {}) {
+  return api.get('/datamodel/objects', { params })
+}
+
 // 搜索对象
 export function searchDataModel(keyword, class_id) {
   const params = { keyword }
@@ -44,6 +49,7 @@ export function getObjectDetail(class_id, obis) {
 export default {
   uploadDataModel,
   getDataModelList,
+  getObjectHeaders,
   searchDataModel,
   getDataModelClasses,
   getDataModelStatus,

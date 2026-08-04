@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   uploadDataModel,
   getDataModelList,
+  getObjectHeaders,
   searchDataModel,
   getDataModelClasses,
   getDataModelStatus,
@@ -13,8 +14,10 @@ const useDataModelStore = create((set, get) => ({
   isLoaded: false,
   // 源文件名
   sourceFile: null,
-  // 总对象数
+  // 总对象数（所有条目数，包括属性和方法）
   totalObjects: 0,
+  // 对象标题行总数（attribute_id=0的对象数）
+  totalObjectHeaders: 0,
 
   // 对象列表（对象标题行，attribute_id=0）
   objects: [],
@@ -108,27 +111,21 @@ const useDataModelStore = create((set, get) => ({
         queryParams.class_id = state.selectedClassId
       }
 
-      const result = await getDataModelList(queryParams)
+      // 使用专用的对象标题行接口，后端已过滤attribute_id=0
+      const result = await getObjectHeaders(queryParams)
 
-      // 防御性编程：确保 result 是数组
-      // 后端 /list 接口应返回数组，但某些异常情况下可能返回对象
-      const dataList = Array.isArray(result) ? result : (result?.data || result?.results || [])
-
-      // 过滤出对象本身（attribute_id=0 或 attribute_id=null/undefined）
-      // 后端返回的是扁平列表，我们只取 attribute_id=0 的对象作为列表项
-      // 兼容 attribute_id 为数字0或字符串"0"的情况
-      const objectHeaders = dataList.filter((obj) => {
-        const attrId = obj.attribute_id
-        return attrId === 0 || attrId === '0' || attrId === null || attrId === undefined
-      })
+      // 后端返回格式: { objects: [...], total: N }
+      const objectList = result.objects || []
+      const total = result.total ?? objectList.length
 
       set({
-        objects: objectHeaders,
+        objects: objectList,
+        totalObjectHeaders: total,
         loading: false,
         isSearching: false
       })
 
-      return objectHeaders
+      return objectList
     } catch (err) {
       set({ loading: false, error: err.message, objects: [] })
       throw err
@@ -201,6 +198,7 @@ const useDataModelStore = create((set, get) => ({
       isLoaded: false,
       sourceFile: null,
       totalObjects: 0,
+      totalObjectHeaders: 0,
       objects: [],
       classes: [],
       selectedClassId: null,

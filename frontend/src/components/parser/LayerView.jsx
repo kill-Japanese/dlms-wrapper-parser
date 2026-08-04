@@ -77,11 +77,28 @@ function LayerView() {
     }
   ]
 
+  // 判断数据是否有效（非空）
+  const checkHasData = (data) => {
+    if (data === null || data === undefined) {
+      return false
+    }
+    // 数组类型：有元素即为有数据
+    if (Array.isArray(data)) {
+      return data.length > 0
+    }
+    // 对象类型：有属性即为有数据
+    if (typeof data === 'object') {
+      return Object.keys(data).length > 0
+    }
+    // 其他类型（字符串、数字等）：非空即为有数据
+    return data !== ''
+  }
+
   return (
     <Row gutter={[16, 16]}>
       {layers.map((layer) => {
         const LayerComponent = layer.component
-        const hasData = layer.data && (typeof layer.data === 'object' && Object.keys(layer.data).length > 0)
+        const hasData = checkHasData(layer.data)
 
         return (
           <Col span={24} key={layer.key}>

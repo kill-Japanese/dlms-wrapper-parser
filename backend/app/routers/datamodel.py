@@ -10,6 +10,7 @@ from app.models.datamodel import (
     CosemObject,
     DataModelUploadResponse,
     DataModelSearchResponse,
+    DataModelObjectListResponse,
     CosemObjectDetail,
 )
 from app.services.datamodel import data_model_manager
@@ -64,14 +65,14 @@ async def upload_datamodel(file: UploadFile = File(..., description="Excel文件
         raise HTTPException(status_code=500, detail=f"上传失败: {e}")
 
 
-@router.get("/list", response_model=list[CosemObject], summary="获取对象列表")
+@router.get("/list", response_model=list[CosemObject], summary="获取对象列表（所有条目）")
 async def list_objects(
     class_id: Optional[int] = Query(None, description="按类ID过滤"),
     limit: int = Query(100, ge=1, le=1000, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
 ):
     """
-    获取COSEM对象列表
+    获取COSEM对象列表（所有条目，包括属性和方法行）
 
     - **class_id**: 可选，按类ID过滤（如 1=Data, 3=Register, 8=ProfileGeneric等）
     - **limit**: 返回数量限制
@@ -87,6 +88,38 @@ async def list_objects(
             offset=offset,
         )
         return objects
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询失败: {e}")
+
+
+@router.get("/objects", response_model=DataModelObjectListResponse, summary="获取对象标题行列表")
+async def list_object_headers(
+    class_id: Optional[int] = Query(None, description="按类ID过滤"),
+    limit: int = Query(200, ge=1, le=1000, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+):
+    """
+    获取COSEM对象标题行列表（仅对象本身，不含属性和方法行）
+
+    只返回 attribute_id=0 的对象记录，用于前端对象列表展示。
+
+    - **class_id**: 可选，按类ID过滤
+    - **limit**: 返回数量限制
+    - **offset**: 分页偏移量
+    """
+    if not data_model_manager.is_loaded:
+        raise HTTPException(status_code=404, detail="数据模型未加载，请先上传Excel文件")
+
+    try:
+        objects, total = data_model_manager.get_object_headers(
+            class_id=class_id,
+            limit=limit,
+            offset=offset,
+        )
+        return DataModelObjectListResponse(
+            objects=objects,
+            total=total,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {e}")
 
