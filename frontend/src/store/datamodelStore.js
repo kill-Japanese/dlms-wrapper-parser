@@ -101,7 +101,7 @@ const useDataModelStore = create((set, get) => ({
     try {
       const state = get()
       const queryParams = {
-        limit: params.limit || 200,
+        limit: params.limit || 500,
         offset: params.offset || 0
       }
       if (state.selectedClassId) {
@@ -114,11 +114,13 @@ const useDataModelStore = create((set, get) => ({
       // 后端 /list 接口应返回数组，但某些异常情况下可能返回对象
       const dataList = Array.isArray(result) ? result : (result?.data || result?.results || [])
 
-      // 过滤出对象本身（attribute_id=0 或 attribute_id=null）
+      // 过滤出对象本身（attribute_id=0 或 attribute_id=null/undefined）
       // 后端返回的是扁平列表，我们只取 attribute_id=0 的对象作为列表项
-      const objectHeaders = dataList.filter(
-        (obj) => obj.attribute_id === 0 || obj.attribute_id === null
-      )
+      // 兼容 attribute_id 为数字0或字符串"0"的情况
+      const objectHeaders = dataList.filter((obj) => {
+        const attrId = obj.attribute_id
+        return attrId === 0 || attrId === '0' || attrId === null || attrId === undefined
+      })
 
       set({
         objects: objectHeaders,
@@ -128,7 +130,7 @@ const useDataModelStore = create((set, get) => ({
 
       return objectHeaders
     } catch (err) {
-      set({ loading: false, error: err.message })
+      set({ loading: false, error: err.message, objects: [] })
       throw err
     }
   },
@@ -146,10 +148,12 @@ const useDataModelStore = create((set, get) => ({
       const state = get()
       const result = await searchDataModel(keyword, state.selectedClassId)
 
-      // 过滤出对象本身（attribute_id=0）
-      const objectHeaders = result.results.filter(
-        (obj) => obj.attribute_id === 0 || obj.attribute_id === null
-      )
+      // 过滤出对象本身（attribute_id=0 或 attribute_id=null/undefined）
+      // 兼容 attribute_id 为数字0或字符串"0"的情况
+      const objectHeaders = result.results.filter((obj) => {
+        const attrId = obj.attribute_id
+        return attrId === 0 || attrId === '0' || attrId === null || attrId === undefined
+      })
 
       set({
         objects: objectHeaders,

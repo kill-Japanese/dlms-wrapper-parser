@@ -215,6 +215,7 @@ function DataModelPage() {
     detailLoading,
     totalObjects,
     sourceFile,
+    error,
     setSearchQuery,
     setSelectedClassId,
     checkStatus,
@@ -505,6 +506,11 @@ function DataModelPage() {
               {/* 对象列表 */}
               <div style={{ flex: 1, overflow: 'auto' }}>
                 <Spin spinning={loading} tip="加载中...">
+                  {error && objects.length === 0 && (
+                    <div style={{ padding: '12px 16px', color: '#ff4d4f', fontSize: 12, background: '#fff2f0' }}>
+                      加载失败: {error}
+                    </div>
+                  )}
                   {objects.length > 0 ? (
                     <List
                       dataSource={objects}

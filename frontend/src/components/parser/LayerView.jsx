@@ -52,11 +52,11 @@ function LayerView() {
       component: WrapperLayer
     },
     {
-      key: 'cipher',
+      key: 'ciphering',
       title: '加密层',
       icon: <LockOutlined />,
       color: 'orange',
-      data: parseResult.cipher,
+      data: parseResult.ciphering,
       component: CipherLayer
     },
     {

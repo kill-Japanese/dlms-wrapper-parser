@@ -24,99 +24,21 @@ import useLogStore from '../store/logStore.js'
 
 const { Title, Text } = Typography
 
-// 模拟解析日志
-const mockParseLogs = [
-  {
-    id: 1,
-    timestamp: '2024-01-15 10:30:15',
-    level: 'info',
-    message: '解析成功 - Wrapper层解析完成',
-    details: { layer: 'wrapper', length: 128 }
-  },
-  {
-    id: 2,
-    timestamp: '2024-01-15 10:30:16',
-    level: 'info',
-    message: '解析成功 - 加密层解密完成',
-    details: { layer: 'cipher', algorithm: 'AES-GCM' }
-  },
-  {
-    id: 3,
-    timestamp: '2024-01-15 10:30:17',
-    level: 'info',
-    message: '解析成功 - 压缩层解压完成',
-    details: { layer: 'compression', ratio: 0.65 }
-  },
-  {
-    id: 4,
-    timestamp: '2024-01-15 10:30:18',
-    level: 'info',
-    message: '解析成功 - APDU解析完成',
-    details: { layer: 'apdu', type: 'GET-RESPONSE' }
-  },
-  {
-    id: 5,
-    timestamp: '2024-01-15 10:31:00',
-    level: 'error',
-    message: '解析失败 - 无效的Hex格式',
-    details: { error: 'Invalid hex string' }
-  },
-  {
-    id: 6,
-    timestamp: '2024-01-15 10:32:00',
-    level: 'warning',
-    message: '警告 - System Title不匹配',
-    details: { expected: '12345678', actual: '87654321' }
-  }
-]
-
-// 模拟数据交互日志
-const mockDataLogs = [
-  {
-    id: 1,
-    timestamp: '2024-01-15 10:30:15.123',
-    direction: 'in',
-    device: 'device-001',
-    hex: 'E6E700...',
-    length: 128
-  },
-  {
-    id: 2,
-    timestamp: '2024-01-15 10:30:15.345',
-    direction: 'out',
-    device: 'device-001',
-    hex: 'E6E700...',
-    length: 64
-  },
-  {
-    id: 3,
-    timestamp: '2024-01-15 10:30:16.000',
-    direction: 'in',
-    device: 'device-001',
-    hex: 'E6E700...',
-    length: 256
-  },
-  {
-    id: 4,
-    timestamp: '2024-01-15 10:30:20.000',
-    direction: 'in',
-    device: 'device-002',
-    hex: 'E6E700...',
-    length: 100
-  }
-]
-
 const levelColors = {
   info: 'blue',
+  warn: 'orange',
   warning: 'orange',
   error: 'red',
-  success: 'green'
+  success: 'green',
+  debug: 'default'
 }
 
 function LogsPage() {
   const {
     activeTab,
     filter,
+    parseLogs,
+    dataLogs,
     setActiveTab,
     setFilter,
     clearParseLogs,
@@ -133,16 +55,25 @@ function LogsPage() {
     }
   }
 
-  // 过滤后的日志
-  const filteredParseLogs = mockParseLogs.filter((log) => {
+  // 过滤后的解析日志
+  const filteredParseLogs = parseLogs.filter((log) => {
     if (filter.level !== 'all' && log.level !== filter.level) return false
-    if (filter.keyword && !log.message.toLowerCase().includes(filter.keyword.toLowerCase())) return false
+    if (filter.keyword) {
+      const keyword = filter.keyword.toLowerCase()
+      const searchText = `${log.message || ''} ${log.step || ''} ${log.details || ''}`.toLowerCase()
+      if (!searchText.includes(keyword)) return false
+    }
     return true
   })
 
-  const filteredDataLogs = mockDataLogs.filter((log) => {
+  // 过滤后的数据交互日志
+  const filteredDataLogs = dataLogs.filter((log) => {
     if (filter.type !== 'all' && log.direction !== filter.type) return false
-    if (filter.keyword && !log.device.toLowerCase().includes(filter.keyword.toLowerCase())) return false
+    if (filter.keyword) {
+      const keyword = filter.keyword.toLowerCase()
+      const searchText = `${log.device || ''} ${log.hex || ''}`.toLowerCase()
+      if (!searchText.includes(keyword)) return false
+    }
     return true
   })
 
@@ -153,6 +84,9 @@ function LogsPage() {
         <Space>
           <FileTextOutlined />
           解析日志
+          <Tag color="blue" style={{ marginLeft: 0 }}>
+            {parseLogs.length}
+          </Tag>
         </Space>
       ),
       children: (
@@ -167,7 +101,7 @@ function LogsPage() {
                 options={[
                   { value: 'all', label: '全部级别' },
                   { value: 'info', label: 'Info' },
-                  { value: 'warning', label: 'Warning' },
+                  { value: 'warn', label: 'Warning' },
                   { value: 'error', label: 'Error' }
                 ]}
               />
@@ -197,8 +131,13 @@ function LogsPage() {
                   <Space direction="vertical" size={4} style={{ width: '100%' }}>
                     <Space>
                       <Tag color={levelColors[log.level] || 'default'}>
-                        {log.level.toUpperCase()}
+                        {(log.level || 'info').toUpperCase()}
                       </Tag>
+                      {log.step && (
+                        <Tag color="default" style={{ fontSize: 11 }}>
+                          {log.step}
+                        </Tag>
+                      )}
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         {log.timestamp}
                       </Text>
@@ -206,7 +145,9 @@ function LogsPage() {
                     <Text>{log.message}</Text>
                     {log.details && (
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        {JSON.stringify(log.details)}
+                        {typeof log.details === 'object'
+                          ? JSON.stringify(log.details)
+                          : String(log.details)}
                       </Text>
                     )}
                   </Space>
@@ -214,7 +155,7 @@ function LogsPage() {
               )}
             />
           ) : (
-            <Empty description="暂无日志" style={{ marginTop: 60 }} />
+            <Empty description="暂无解析日志" style={{ marginTop: 60 }} />
           )}
         </div>
       )
@@ -225,6 +166,9 @@ function LogsPage() {
         <Space>
           <ArrowDownOutlined />
           数据交互日志
+          <Tag color="green" style={{ marginLeft: 0 }}>
+            {dataLogs.length}
+          </Tag>
         </Space>
       ),
       children: (
@@ -278,31 +222,35 @@ function LogsPage() {
                         <Tag color={log.direction === 'in' ? 'green' : 'blue'}>
                           {log.direction === 'in' ? '上行' : '下行'}
                         </Tag>
-                        <Text strong>{log.device}</Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {log.length} bytes
-                        </Text>
+                        <Text strong>{log.device || '未知设备'}</Text>
+                        {log.length !== undefined && (
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            {log.length} bytes
+                          </Text>
+                        )}
                         <Text type="secondary" style={{ fontSize: 12 }}>
                           {log.timestamp}
                         </Text>
                       </Space>
-                      <Text
-                        code
-                        style={{
-                          fontSize: 12,
-                          wordBreak: 'break-all',
-                          display: 'block'
-                        }}
-                      >
-                        {log.hex}
-                      </Text>
+                      {log.hex && (
+                        <Text
+                          code
+                          style={{
+                            fontSize: 12,
+                            wordBreak: 'break-all',
+                            display: 'block'
+                          }}
+                        >
+                          {log.hex}
+                        </Text>
+                      )}
                     </Space>
                   </Space>
                 </List.Item>
               )}
             />
           ) : (
-            <Empty description="暂无日志" style={{ marginTop: 60 }} />
+            <Empty description="暂无数据交互日志" style={{ marginTop: 60 }} />
           )}
         </div>
       )

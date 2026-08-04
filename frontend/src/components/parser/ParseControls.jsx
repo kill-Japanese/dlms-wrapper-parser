@@ -6,6 +6,7 @@ import {
   ClearOutlined
 } from '@ant-design/icons'
 import useParserStore from '../../store/parserStore.js'
+import useLogStore from '../../store/logStore.js'
 import { parseHex, buildFrame } from '../../services/parser.js'
 
 function ParseControls() {
@@ -21,6 +22,8 @@ function ParseControls() {
     reset,
     autoFillFromParseResult
   } = useParserStore()
+
+  const { addParseLog, setParseLogs } = useLogStore()
 
   const handleParse = async () => {
     if (!rawHex.trim()) {
@@ -43,6 +46,27 @@ function ParseControls() {
       // 从解析结果中自动回填 System Title 和 Invocation Counter
       autoFillFromParseResult(result)
 
+      // 将解析日志添加到日志store
+      if (result.parse_logs && result.parse_logs.length > 0) {
+        const logs = result.parse_logs.map((log, index) => ({
+          id: Date.now() + index,
+          timestamp: log.timestamp || new Date().toISOString(),
+          level: log.level || 'info',
+          step: log.step || '',
+          message: log.message || ''
+        }))
+        setParseLogs(logs)
+      } else {
+        // 如果没有详细日志，添加一条总结日志
+        addParseLog({
+          level: 'info',
+          step: 'complete',
+          message: result.errors && result.errors.length > 0
+            ? `解析完成，有 ${result.errors.length} 个警告`
+            : '解析成功'
+        })
+      }
+
       if (result.errors && result.errors.length > 0) {
         message.warning(`解析完成，但有 ${result.errors.length} 个警告`)
       } else {
@@ -51,6 +75,12 @@ function ParseControls() {
     } catch (error) {
       message.error(error.message || '解析失败')
       console.error('Parse error:', error)
+      // 记录错误日志
+      addParseLog({
+        level: 'error',
+        step: 'parse',
+        message: error.message || '解析失败'
+      })
     } finally {
       setLoading(false)
     }
