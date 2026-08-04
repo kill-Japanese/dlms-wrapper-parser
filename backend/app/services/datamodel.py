@@ -136,13 +136,23 @@ class DataModelManager:
         if "Object model" in wb.sheetnames:
             ws = wb["Object model"]
             # 检查前几行是否符合SABESP格式特征
-            for i, row in enumerate(ws.iter_rows(min_row=1, max_row=10, values_only=True)):
-                # 检查D列(索引3)是否有数字字符串的class_id
+            for i, row in enumerate(ws.iter_rows(min_row=1, max_row=15, values_only=True)):
+                # 检查D列(索引3)是否有class_id（可以是int或数字字符串）
                 d_val = row[3] if len(row) > 3 else None
                 f_val = row[5] if len(row) > 5 else None
-                if (d_val and isinstance(d_val, str) and d_val.strip().isdigit()
-                        and f_val and isinstance(f_val, str)
-                        and re.match(r'^\d+-\d+:', f_val.strip())):
+                # D列可以是int或数字字符串
+                d_is_class_id = False
+                if isinstance(d_val, int):
+                    d_is_class_id = True
+                elif isinstance(d_val, str) and d_val.strip().isdigit():
+                    d_is_class_id = True
+                # F列需要是OBIS格式的字符串
+                f_is_obis = False
+                if f_val and isinstance(f_val, str):
+                    f_str = f_val.strip()
+                    if re.match(r'^\d+-\d+:\d+\.\d+\.\d+\.\d+$', f_str):
+                        f_is_obis = True
+                if d_is_class_id and f_is_obis:
                     return "sabesp"
 
         # 检查活动sheet的表头是否符合标准格式
@@ -205,7 +215,7 @@ class DataModelManager:
 
         SABESP格式特点:
         - Sheet名: "Object model"
-        - 对象标题行: D列(IC)有数字字符串的class_id，A列为空，F列有OBIS码
+        - 对象标题行: D列(IC)有数字值的class_id，A列为空，F列有OBIS码
         - 属性行: A列有数字序号，B列是属性名，C列是数据类型
         - 方法行: A列有数字序号，B列是方法名，C列可能有返回类型
         - 属性和方法分开编号（都从1开始），方法在属性之后，通过序号重置检测
@@ -224,6 +234,7 @@ class DataModelManager:
         in_method_section = False  # 是否在方法部分
         last_attr_id = 0  # 上一个属性/方法ID，用于检测方法部分的开始
         attr_count = 0  # 当前对象已解析的属性数量
+        method_count = 0  # 当前对象已解析的方法数量
 
         for row_idx, row in enumerate(ws.iter_rows(min_row=1, values_only=True), start=1):
             try:
@@ -260,6 +271,7 @@ class DataModelManager:
                     in_method_section = False
                     last_attr_id = 0
                     attr_count = 0
+                    method_count = 0
 
                     # 对象本身也作为一条记录（attribute_id=0）
                     obj = CosemObject(
@@ -279,11 +291,15 @@ class DataModelManager:
                 elif current_object and a_val is not None:
                     # 属性/方法行
                     attr_id = self._parse_attribute_id(a_val)
-                    if attr_id is None:
+                    if attr_id is None or attr_id <= 0:
                         continue
 
                     attr_name = str(b_val).strip() if b_val else ""
                     data_type = str(c_val).strip() if c_val else ""
+
+                    # 跳过空名称的行
+                    if not attr_name:
+                        continue
 
                     # 检测是否进入方法部分
                     # 当序号从大于1的值回到1时，说明进入了方法部分
@@ -299,11 +315,12 @@ class DataModelManager:
                             obis=current_object["obis"],
                             name=attr_name,
                             data_type=data_type,
-                            description=f"Method of {current_object['name']} (method_id={method_id})",
+                            description=f"Method: {attr_name} (method_id={method_id})",
                             attribute_id=-method_id,
                             unit="",
                             scaler=1.0,
                         )
+                        method_count += 1
                     else:
                         # 属性行
                         obj = CosemObject(
@@ -311,7 +328,7 @@ class DataModelManager:
                             obis=current_object["obis"],
                             name=attr_name,
                             data_type=data_type,
-                            description=f"Attribute of {current_object['name']}",
+                            description=f"Attribute: {attr_name}",
                             attribute_id=attr_id,
                             unit="",
                             scaler=1.0,
@@ -335,7 +352,7 @@ class DataModelManager:
 
         标题行特征:
         - A列为空
-        - D列(IC/Class)有数字字符串值（class_id）
+        - D列(IC/Class)有数字值（class_id，可以是int或数字字符串）
         - F列(OBIS code)有OBIS格式的值（A-B:C.D.E.F）
 
         Args:
@@ -350,17 +367,24 @@ class DataModelManager:
         if a_val is not None and str(a_val).strip() != "":
             return False
 
-        # D列有数字字符串值
+        # D列有数字值（可以是int或数字字符串）
         if d_val is None:
             return False
-        d_str = str(d_val).strip()
-        if not d_str.isdigit():
+        if isinstance(d_val, int):
+            pass  # int类型直接通过
+        elif isinstance(d_val, str):
+            d_str = d_val.strip()
+            if not d_str.isdigit():
+                return False
+        else:
             return False
 
         # F列有OBIS格式的值
         if f_val is None:
             return False
-        f_str = str(f_val).strip()
+        if not isinstance(f_val, str):
+            return False
+        f_str = f_val.strip()
         if not re.match(r'^\d+-\d+:\d+\.\d+\.\d+\.\d+$', f_str):
             return False
 

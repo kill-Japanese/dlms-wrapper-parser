@@ -6,12 +6,25 @@ from typing import Optional
 
 
 class CipherInfo(BaseModel):
-    """加密信息模型"""
+    """加密信息模型
 
-    encrypted: bool = Field(default=False, description="是否加密")
-    authenticated: bool = Field(default=False, description="是否认证")
-    compressed: bool = Field(default=False, description="是否压缩")
-    key_id: int = Field(default=0, description="密钥ID")
+    Security Control (SC) 字节位定义 (参考 DLMS 蓝皮书/IEC 62056-53):
+    - bit 0 (0x01): EK - Encryption Key 使用标识（1=已加密）
+    - bit 1 (0x02): AK - Authentication Key 使用标识（1=已认证）
+    - bit 2 (0x04): 压缩标识（1=已压缩，V.44）
+    - bit 3-4 (0x08, 0x10): Key 类型标识
+      - 00 (0x00) = Unicast / GUEK (Global Unicast Encryption Key)
+      - 01 (0x08) = Broadcast / GUBK (Global Unicast Broadcast Key)
+      - 10 (0x10) = System Key
+    - bit 5 (0x20): ECC 签名标识（1=有ECC签名）
+    - bit 6-7: 保留
+    """
+
+    encrypted: bool = Field(default=False, description="是否加密 (bit 0, EK)")
+    authenticated: bool = Field(default=False, description="是否认证 (bit 1, AK)")
+    compressed: bool = Field(default=False, description="是否压缩 (bit 2, V.44)")
+    key_id: int = Field(default=0, description="密钥标识 (bit 3-4): 0=Unicast/GUEK, 1=Broadcast/GUBK, 2=System")
+    ecc_signed: bool = Field(default=False, description="是否有ECC签名 (bit 5)")
 
 
 class CipherFrame(BaseModel):
@@ -25,6 +38,7 @@ class CipherFrame(BaseModel):
     gmac_tag: str = Field(default="", description="GMAC认证标签")
     decrypt_success: bool = Field(default=False, description="解密是否成功")
     cipher_info: Optional[CipherInfo] = Field(default=None, description="加密详情")
+    extracted_from_frame: bool = Field(default=False, description="System Title和Invocation Counter是否从帧中提取")
 
     model_config = {
         "json_schema_extra": {
@@ -36,11 +50,13 @@ class CipherFrame(BaseModel):
                 "ciphered_data_hex": "abcd1234...",
                 "gmac_tag": "deadbeef",
                 "decrypt_success": True,
+                "extracted_from_frame": True,
                 "cipher_info": {
                     "encrypted": True,
                     "authenticated": False,
                     "compressed": False,
                     "key_id": 0,
+                    "ecc_signed": False,
                 },
             }
         }

@@ -12,7 +12,9 @@ import {
   Popconfirm,
   message,
   Divider,
-  Typography
+  Typography,
+  Select,
+  Tooltip
 } from 'antd'
 import {
   PlusOutlined,
@@ -20,17 +22,24 @@ import {
   UpOutlined,
   DownOutlined,
   DatabaseOutlined,
-  SaveOutlined
+  SaveOutlined,
+  InfoCircleOutlined
 } from '@ant-design/icons'
 import usePullStore from '../../store/pullStore.js'
+import useStreamStore from '../../store/streamStore.js'
 
 const { Text } = Typography
 const { TextArea } = Input
+const { Option } = Select
 
 function PresetEditor({ preset, onSave, onClose, onOpenObjectSelector }) {
   const [form] = Form.useForm()
   const [operations, setOperations] = useState([])
+  const [systemTitle, setSystemTitle] = useState('')
+  const [deviceName, setDeviceName] = useState('')
+  const [keyType, setKeyType] = useState('GUEK')
   const { updatePreset } = usePullStore()
+  const { connectedDevices } = useStreamStore()
 
   useEffect(() => {
     if (preset) {
@@ -39,9 +48,15 @@ function PresetEditor({ preset, onSave, onClose, onOpenObjectSelector }) {
         description: preset.description
       })
       setOperations(preset.operations || [])
+      setSystemTitle(preset.system_title || '')
+      setDeviceName(preset.device_name || '')
+      setKeyType(preset.key_type || 'GUEK')
     } else {
       form.resetFields()
       setOperations([])
+      setSystemTitle('')
+      setDeviceName('')
+      setKeyType('GUEK')
     }
   }, [preset])
 
@@ -84,13 +99,50 @@ function PresetEditor({ preset, onSave, onClose, onOpenObjectSelector }) {
     setOperations(newOps)
   }
 
+  // 验证 System Title 格式（8字节十六进制 = 16个十六进制字符）
+  const validateSystemTitle = (value) => {
+    if (!value) return true
+    const cleanValue = value.replace(/\s/g, '').toUpperCase()
+    if (!/^[0-9A-F]{16}$/.test(cleanValue)) {
+      return 'System Title 必须是 8 字节十六进制（16 个十六进制字符）'
+    }
+    return true
+  }
+
+  const handleSystemTitleChange = (e) => {
+    const value = e.target.value.toUpperCase()
+    setSystemTitle(value)
+  }
+
+  // 从已连接设备中选择
+  const handleSelectDevice = (deviceSystemTitle) => {
+    const device = connectedDevices.find((d) => d.system_title === deviceSystemTitle)
+    if (device) {
+      setSystemTitle(device.system_title || '')
+      setDeviceName(device.device_name || '')
+    }
+  }
+
   const handleSave = async () => {
     try {
       const values = await form.validateFields()
+
+      // 验证 System Title
+      const stError = validateSystemTitle(systemTitle)
+      if (stError !== true) {
+        message.error(stError)
+        return
+      }
+
+      const cleanSystemTitle = systemTitle ? systemTitle.replace(/\s/g, '').toUpperCase() : null
+
       const updatedPreset = {
         ...preset,
         name: values.name,
         description: values.description,
+        system_title: cleanSystemTitle,
+        device_name: deviceName || null,
+        key_type: keyType,
         operations
       }
       updatePreset(preset.id, updatedPreset)
@@ -204,6 +256,8 @@ function PresetEditor({ preset, onSave, onClose, onOpenObjectSelector }) {
     }
   ]
 
+  const stError = validateSystemTitle(systemTitle)
+
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 基本信息 */}
@@ -239,6 +293,101 @@ function PresetEditor({ preset, onSave, onClose, onOpenObjectSelector }) {
             </Col>
           </Row>
         </Form>
+      </Card>
+
+      {/* 设备配置区 */}
+      <Card
+        size="small"
+        title={
+          <Space>
+            <Text strong>设备配置</Text>
+            <Tooltip title="配置目标设备的 System Title，执行预设时将使用此设备">
+              <InfoCircleOutlined style={{ color: '#999' }} />
+            </Tooltip>
+          </Space>
+        }
+        style={{ marginBottom: 12 }}
+      >
+        <Row gutter={16}>
+          <Col span={12}>
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+                设备名称 <Text type="secondary">(可选)</Text>
+              </Text>
+              <Input
+                value={deviceName}
+                onChange={(e) => setDeviceName(e.target.value)}
+                placeholder="输入设备名称，方便识别"
+              />
+            </div>
+          </Col>
+          <Col span={12}>
+            <div style={{ marginBottom: 12 }}>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+                密钥类型
+              </Text>
+              <Select
+                value={keyType}
+                onChange={setKeyType}
+                style={{ width: '100%' }}
+              >
+                <Option value="GUEK">GUEK (全局唯一加密密钥)</Option>
+                <Option value="GUBK">GUBK (全局唯一广播密钥)</Option>
+              </Select>
+            </div>
+          </Col>
+        </Row>
+        <Row gutter={16}>
+          <Col span={16}>
+            <div style={{ marginBottom: 0 }}>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+                System Title <Text type="danger">*</Text>
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>
+                  (8字节十六进制，共16个字符)
+                </Text>
+              </Text>
+              <Input
+                value={systemTitle}
+                onChange={handleSystemTitleChange}
+                placeholder="例如: 0000000000000001"
+                status={stError !== true && systemTitle ? 'error' : ''}
+                style={{ fontFamily: 'monospace' }}
+              />
+              {stError !== true && systemTitle && (
+                <Text type="danger" style={{ fontSize: 12 }}>
+                  {stError}
+                </Text>
+              )}
+            </div>
+          </Col>
+          <Col span={8}>
+            <div style={{ marginBottom: 0 }}>
+              <Text type="secondary" style={{ display: 'block', marginBottom: 4 }}>
+                从已连接设备选择
+              </Text>
+              <Select
+                value=""
+                onChange={handleSelectDevice}
+                placeholder="选择设备..."
+                style={{ width: '100%' }}
+                allowClear
+                disabled={connectedDevices.length === 0}
+              >
+                {connectedDevices.map((device) => (
+                  <Option key={device.system_title} value={device.system_title}>
+                    {device.device_name || device.system_title}
+                    {device.ip ? ` (${device.ip})` : ''}
+                  </Option>
+                ))}
+              </Select>
+              {connectedDevices.length === 0 && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  暂无已连接设备
+                </Text>
+              )}
+            </div>
+          </Col>
+        </Row>
       </Card>
 
       {/* 操作列表 */}

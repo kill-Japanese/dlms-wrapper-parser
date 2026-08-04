@@ -29,6 +29,9 @@ class PullPreset(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="预设ID")
     name: str = Field(description="预设名称")
     description: str = Field(default="", description="描述")
+    system_title: Optional[str] = Field(default=None, description="目标设备System Title (8字节十六进制)")
+    device_name: Optional[str] = Field(default=None, description="目标设备名称")
+    key_type: Optional[str] = Field(default="GUEK", description="密钥类型: GUEK/GUBK")
     operations: List[PullOperationItem] = Field(default_factory=list, description="操作列表")
 
 
@@ -36,6 +39,9 @@ class PullPresetUpdate(BaseModel):
     """Pull预设更新"""
     name: Optional[str] = Field(default=None, description="预设名称")
     description: Optional[str] = Field(default=None, description="描述")
+    system_title: Optional[str] = Field(default=None, description="目标设备System Title")
+    device_name: Optional[str] = Field(default=None, description="目标设备名称")
+    key_type: Optional[str] = Field(default=None, description="密钥类型: GUEK/GUBK")
     operations: Optional[List[PullOperationItem]] = Field(default=None, description="操作列表")
 
 
@@ -57,6 +63,7 @@ class ExecutePresetRequest(BaseModel):
     with_wrapper: bool = Field(default=True, description="是否封装Wrapper帧")
     src_wport: int = Field(default=1, description="源WPort")
     dst_wport: int = Field(default=16, description="目的WPort")
+    system_title: Optional[str] = Field(default=None, description="覆盖预设的System Title")
 
 
 class ExecuteOperationsRequest(BaseModel):
@@ -80,6 +87,9 @@ def _init_default_presets():
             id="default-electricity",
             name="电表基础数据",
             description="读取电表的基础电能数据",
+            system_title=None,
+            device_name=None,
+            key_type="GUEK",
             operations=[
                 PullOperationItem(
                     class_id=3,
@@ -284,7 +294,10 @@ async def execute_preset(request: ExecutePresetRequest):
 
         operations = [op.model_dump() for op in preset.operations]
 
-        return await _execute_operations_internal(
+        # 确定使用的 system_title: 请求参数优先，其次使用预设配置
+        system_title = request.system_title or preset.system_title
+
+        result = await _execute_operations_internal(
             operations=operations,
             use_with_list=request.use_with_list,
             with_wrapper=request.with_wrapper,
@@ -293,6 +306,13 @@ async def execute_preset(request: ExecutePresetRequest):
             preset_name=preset.name,
             preset_id=preset.id,
         )
+
+        # 在结果中附加设备信息
+        result["system_title"] = system_title
+        result["device_name"] = preset.device_name
+        result["key_type"] = preset.key_type
+
+        return result
     except HTTPException:
         raise
     except Exception as e:

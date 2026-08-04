@@ -2,15 +2,19 @@
 加解密层 (Ciphering Layer)
 
 DLMS/COSEM 安全加密使用 AES-GCM 算法
-参考: IEC 62056-53 Clause 7.4.2
+参考: IEC 62056-53 Clause 7.4.2 (Blue Book) / Green Book
 
 加密帧格式 (General-Glo-Ciphering / General-Ciphering):
 - Security Control (1 byte): 安全控制字节
-  - bit 0: 加密标识 (1=加密)
-  - bit 1: 认证标识 (1=认证)
-  - bit 2: 压缩标识 (1=压缩)
-  - bit 3-4: 密钥标识 (0=unicast, 1=broadcast, 2=system)
-  - bit 5-7: 保留
+  - bit 0 (0x01): EK - Encryption Key 使用标识（1=已加密）
+  - bit 1 (0x02): AK - Authentication Key 使用标识（1=已认证）
+  - bit 2 (0x04): 压缩标识（1=已压缩，V.44）
+  - bit 3-4 (0x08, 0x10): Key 类型标识
+    - 00 (0x00) = Unicast / GUEK (Global Unicast Encryption Key)
+    - 01 (0x08) = Broadcast / GUBK (Global Unicast Broadcast Key)
+    - 10 (0x10) = System Key
+  - bit 5 (0x20): ECC 签名标识（1=有ECC签名）
+  - bit 6-7: 保留
 - System Title (8 bytes): 系统标题
 - Length of invocation counter (n)
 - Invocation Counter (n bytes): 调用计数器
@@ -30,10 +34,17 @@ class CipheringError(Exception):
     pass
 
 
-# 密钥ID常量
-KEY_ID_UNICAST = 0    # GUEK - Global Unicast Encryption Key
-KEY_ID_BROADCAST = 1  # GUBK - Global Unicast Broadcast Key
-KEY_ID_SYSTEM = 2     # 系统密钥（暂用GUEK）
+# 密钥ID常量 (Security Control bit 3-4)
+KEY_ID_UNICAST = 0    # 00b - GUEK - Global Unicast Encryption Key（全局单播加密密钥）
+KEY_ID_BROADCAST = 1  # 01b - GUBK - Global Unicast Broadcast Key（全局广播密钥）
+KEY_ID_SYSTEM = 2     # 10b - System Key（系统密钥）
+
+# SC字节位掩码常量
+SC_MASK_ENCRYPTED = 0x01     # bit 0 - EK (Encryption Key used)
+SC_MASK_AUTHENTICATED = 0x02  # bit 1 - AK (Authentication Key used)
+SC_MASK_COMPRESSED = 0x04     # bit 2 - Compressed (V.44)
+SC_MASK_KEY_ID = 0x18         # bit 3-4 - Key Identifier (0x08 | 0x10)
+SC_MASK_ECC_SIGNED = 0x20     # bit 5 - ECC signature present
 
 
 def select_key_by_id(key_id: int, keys: Dict[str, Optional[bytes]]) -> Optional[bytes]:
@@ -66,24 +77,34 @@ def select_key_by_id(key_id: int, keys: Dict[str, Optional[bytes]]) -> Optional[
 
 def _parse_security_control(sc_byte: int) -> CipherInfo:
     """
-    解析安全控制字节
+    解析安全控制字节 (Security Control byte)
+
+    SC字节位定义:
+    - bit 0 (0x01): EK - 加密标识
+    - bit 1 (0x02): AK - 认证标识
+    - bit 2 (0x04): 压缩标识 (V.44)
+    - bit 3-4 (0x18): Key 类型标识 (0=unicast, 1=broadcast, 2=system)
+    - bit 5 (0x20): ECC 签名标识
+    - bit 6-7: 保留
 
     Args:
-        sc_byte: 安全控制字节值
+        sc_byte: 安全控制字节值 (0x00 - 0xFF)
 
     Returns:
         CipherInfo: 加密信息对象
     """
-    encrypted = bool(sc_byte & 0x01)
-    authenticated = bool(sc_byte & 0x02)
-    compressed = bool(sc_byte & 0x04)
-    key_id = (sc_byte >> 3) & 0x03  # bit 3-4
+    encrypted = bool(sc_byte & SC_MASK_ENCRYPTED)
+    authenticated = bool(sc_byte & SC_MASK_AUTHENTICATED)
+    compressed = bool(sc_byte & SC_MASK_COMPRESSED)
+    key_id = (sc_byte & SC_MASK_KEY_ID) >> 3  # bit 3-4
+    ecc_signed = bool(sc_byte & SC_MASK_ECC_SIGNED)
 
     return CipherInfo(
         encrypted=encrypted,
         authenticated=authenticated,
         compressed=compressed,
         key_id=key_id,
+        ecc_signed=ecc_signed,
     )
 
 
@@ -95,16 +116,18 @@ def _build_security_control(cipher_info: CipherInfo) -> int:
         cipher_info: 加密信息
 
     Returns:
-        int: 安全控制字节值
+        int: 安全控制字节值 (0x00 - 0xFF)
     """
     sc = 0
     if cipher_info.encrypted:
-        sc |= 0x01
+        sc |= SC_MASK_ENCRYPTED
     if cipher_info.authenticated:
-        sc |= 0x02
+        sc |= SC_MASK_AUTHENTICATED
     if cipher_info.compressed:
-        sc |= 0x04
+        sc |= SC_MASK_COMPRESSED
     sc |= (cipher_info.key_id & 0x03) << 3
+    if cipher_info.ecc_signed:
+        sc |= SC_MASK_ECC_SIGNED
     return sc
 
 
@@ -248,6 +271,7 @@ def parse_ciphered(
         gmac_tag=bytes_to_hex(gmac_tag),
         decrypt_success=decrypt_success,
         cipher_info=cipher_info,
+        extracted_from_frame=True,  # ST和IC始终从帧中提取
     )
 
     return plaintext, cipher_frame

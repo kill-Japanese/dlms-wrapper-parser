@@ -4,7 +4,8 @@ import {
   DeleteOutlined,
   PlayCircleOutlined,
   CopyOutlined,
-  PlusOutlined
+  PlusOutlined,
+  MobileOutlined
 } from '@ant-design/icons'
 import usePullStore from '../../store/pullStore.js'
 
@@ -101,6 +102,7 @@ function PresetList({ onEdit, onExecute, onAdd }) {
           ]}
         >
           <List.Item.Meta
+            avatar={<MobileOutlined style={{ fontSize: 20, color: '#1677ff' }} />}
             title={
               <Space>
                 <Text strong>{preset.name}</Text>
@@ -108,13 +110,35 @@ function PresetList({ onEdit, onExecute, onAdd }) {
               </Space>
             }
             description={
-              <Paragraph
-                type="secondary"
-                ellipsis={{ rows: 1 }}
-                style={{ marginBottom: 0 }}
-              >
-                {preset.description || '暂无描述'}
-              </Paragraph>
+              <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                <Paragraph
+                  type="secondary"
+                  ellipsis={{ rows: 1 }}
+                  style={{ marginBottom: 0 }}
+                >
+                  {preset.description || '暂无描述'}
+                </Paragraph>
+                <Space size={8}>
+                  {preset.device_name ? (
+                    <Tag color="green" style={{ margin: 0 }}>
+                      {preset.device_name}
+                    </Tag>
+                  ) : preset.system_title ? (
+                    <Tag color="cyan" style={{ margin: 0, fontFamily: 'monospace' }}>
+                      ST: {preset.system_title}
+                    </Tag>
+                  ) : (
+                    <Tag color="default" style={{ margin: 0 }}>
+                      未配置设备
+                    </Tag>
+                  )}
+                  {preset.key_type && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      密钥: {preset.key_type}
+                    </Text>
+                  )}
+                </Space>
+              </Space>
             }
           />
         </List.Item>

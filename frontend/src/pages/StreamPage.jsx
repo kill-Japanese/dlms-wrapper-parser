@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   Row,
   Col,
@@ -15,7 +15,14 @@ import {
   Tabs,
   Statistic,
   Divider,
-  message
+  message,
+  Select,
+  Switch,
+  InputNumber,
+  Tooltip,
+  Popconfirm,
+  Modal,
+  Form
 } from 'antd'
 import {
   ThunderboltOutlined,
@@ -23,89 +30,283 @@ import {
   StopOutlined,
   SendOutlined,
   DesktopOutlined,
-  RocketOutlined
+  RocketOutlined,
+  SettingOutlined,
+  EditOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  CheckOutlined,
+  CloseOutlined
 } from '@ant-design/icons'
 import useStreamStore from '../store/streamStore.js'
+import {
+  getTcpStatus,
+  getTcpConfig,
+  updateTcpConfig,
+  startTcpServer,
+  stopTcpServer,
+  restartTcpServer,
+  getTcpClients,
+  renameDevice,
+  sendTcpData
+} from '../services/streamApi.js'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
-
-// 模拟帧数据
-const mockFrames = [
-  {
-    id: 1,
-    timestamp: '2024-01-15 10:30:15.123',
-    direction: 'in',
-    device: 'device-001',
-    hex: 'E6E700...',
-    length: 128,
-    type: 'AARQ'
-  },
-  {
-    id: 2,
-    timestamp: '2024-01-15 10:30:15.345',
-    direction: 'out',
-    device: 'device-001',
-    hex: 'E6E700...',
-    length: 64,
-    type: 'AARE'
-  },
-  {
-    id: 3,
-    timestamp: '2024-01-15 10:30:16.000',
-    direction: 'in',
-    device: 'device-001',
-    hex: 'E6E700...',
-    length: 256,
-    type: 'GET-RESPONSE'
-  }
-]
+const { Option } = Select
 
 function StreamPage() {
   const {
     tcpStatus,
-    tcpPort,
+    tcpConfig,
     connectedDevices,
     frames,
     selectedFrameId,
     sendPanel,
     setTcpStatus,
+    setTcpConfig,
+    setDevices,
+    addDevice,
+    updateDevice,
+    removeDevice,
+    renameDevice: renameDeviceInStore,
     selectFrame,
-    setSendPanel
+    setSendPanel,
+    addFrame
   } = useStreamStore()
 
-  const [displayFrames] = useState(mockFrames)
-  const selectedFrame = displayFrames.find((f) => f.id === selectedFrameId)
+  const [selectedFrame, setSelectedFrame] = useState(null)
+  const [configPanelVisible, setConfigPanelVisible] = useState(false)
+  const [editingDevice, setEditingDevice] = useState(null)
+  const [editingName, setEditingName] = useState('')
+  const [configForm] = Form.useForm()
+  const [configSaving, setConfigSaving] = useState(false)
+  const [loadingDevices, setLoadingDevices] = useState(false)
 
-  const mockDevices = [
-    { id: 'device-001', address: '192.168.1.100', wport: 1, connectedAt: '10:30:00', status: 'active' },
-    { id: 'device-002', address: '192.168.1.101', wport: 2, connectedAt: '10:31:00', status: 'active' }
-  ]
+  // 初始化：加载配置和状态
+  useEffect(() => {
+    loadTcpStatus()
+    loadTcpConfigFromServer()
+  }, [])
 
-  const handleStartServer = () => {
+  // 加载 TCP 状态
+  const loadTcpStatus = async () => {
+    try {
+      const status = await getTcpStatus()
+      if (status?.running !== undefined) {
+        setTcpStatus(status.running ? 'running' : 'stopped')
+        setTcpConfig({
+          port: status.port,
+          protocol: status.protocol
+        })
+      }
+    } catch (e) {
+      console.log('获取TCP状态失败:', e.message)
+    }
+  }
+
+  // 从服务器加载配置
+  const loadTcpConfigFromServer = async () => {
+    try {
+      const result = await getTcpConfig()
+      if (result?.config) {
+        setTcpConfig(result.config)
+      }
+    } catch (e) {
+      console.log('获取TCP配置失败，使用本地配置:', e.message)
+    }
+  }
+
+  // 加载设备列表
+  const loadDevices = async () => {
+    if (tcpStatus !== 'running') return
+    setLoadingDevices(true)
+    try {
+      const result = await getTcpClients()
+      if (result?.devices) {
+        // 转换为前端格式
+        const devices = result.devices.map((d) => ({
+          system_title: d.system_title,
+          device_name: d.device_name,
+          ip: d.client_ip,
+          port: d.client_port,
+          connection_id: d.connection_id,
+          connected: d.status === 'connected',
+          last_seen: d.last_seen || d.last_frame_time,
+          connected_at: d.connected_at,
+          frames_received: d.frames_received
+        }))
+        setDevices(devices)
+      }
+    } catch (e) {
+      console.log('获取设备列表失败:', e.message)
+    } finally {
+      setLoadingDevices(false)
+    }
+  }
+
+  // 当服务器运行时，定期刷新设备列表
+  useEffect(() => {
+    if (tcpStatus === 'running') {
+      loadDevices()
+      const interval = setInterval(loadDevices, 5000)
+      return () => clearInterval(interval)
+    }
+  }, [tcpStatus])
+
+  // 选中帧详情
+  useEffect(() => {
+    if (selectedFrameId) {
+      const frame = frames.find((f) => f.id === selectedFrameId)
+      setSelectedFrame(frame || null)
+    } else {
+      setSelectedFrame(null)
+    }
+  }, [selectedFrameId, frames])
+
+  // 启动服务器
+  const handleStartServer = async () => {
     setTcpStatus('starting')
-    setTimeout(() => {
+    try {
+      await startTcpServer()
       setTcpStatus('running')
-      message.success(`TCP 服务器已启动，端口: ${tcpPort}`)
-    }, 1000)
-  }
-
-  const handleStopServer = () => {
-    setTcpStatus('stopping')
-    setTimeout(() => {
+      message.success(`${tcpConfig.protocol.toUpperCase()} 服务器已启动，端口: ${tcpConfig.port}`)
+      loadDevices()
+    } catch (e) {
       setTcpStatus('stopped')
-      message.info('TCP 服务器已停止')
-    }, 800)
+      message.error(`启动失败: ${e.message}`)
+    }
   }
 
-  const handleSend = () => {
+  // 停止服务器
+  const handleStopServer = async () => {
+    setTcpStatus('stopping')
+    try {
+      await stopTcpServer()
+      setTcpStatus('stopped')
+      message.info('服务器已停止')
+    } catch (e) {
+      setTcpStatus('running')
+      message.error(`停止失败: ${e.message}`)
+    }
+  }
+
+  // 打开配置面板
+  const handleOpenConfig = () => {
+    configForm.setFieldsValue(tcpConfig)
+    setConfigPanelVisible(true)
+  }
+
+  // 保存配置
+  const handleSaveConfig = async () => {
+    try {
+      const values = await configForm.validateFields()
+      setConfigSaving(true)
+
+      // 先保存到本地
+      setTcpConfig(values)
+
+      // 尝试同步到服务器
+      try {
+        await updateTcpConfig(values)
+        message.success('配置已保存')
+      } catch (e) {
+        message.warning('已保存到本地，服务器同步失败')
+      }
+
+      setConfigPanelVisible(false)
+
+      // 如果服务器正在运行，提示需要重启
+      if (tcpStatus === 'running') {
+        message.info('配置已更新，重启服务器后生效')
+      }
+    } catch (e) {
+      if (e.errorFields) {
+        message.error('请填写正确的配置信息')
+      }
+    } finally {
+      setConfigSaving(false)
+    }
+  }
+
+  // 重启服务器应用配置
+  const handleRestartServer = async () => {
+    setTcpStatus('stopping')
+    try {
+      await restartTcpServer()
+      setTcpStatus('running')
+      message.success('服务器已重启，新配置已生效')
+      loadDevices()
+    } catch (e) {
+      message.error(`重启失败: ${e.message}`)
+      setTcpStatus('running')
+    }
+  }
+
+  // 开始编辑设备名称
+  const handleStartRename = (device) => {
+    setEditingDevice(device.system_title || device.connection_id)
+    setEditingName(device.device_name || '')
+  }
+
+  // 保存设备名称
+  const handleSaveRename = async (device) => {
+    const systemTitle = device.system_title
+    if (!systemTitle) {
+      message.warning('设备尚未识别，无法重命名')
+      setEditingDevice(null)
+      return
+    }
+
+    try {
+      renameDeviceInStore(systemTitle, editingName)
+      // 尝试同步到后端
+      try {
+        await renameDevice(systemTitle, editingName)
+      } catch (e) {
+        console.log('同步设备名称到服务器失败:', e.message)
+      }
+      message.success('设备名称已更新')
+    } catch (e) {
+      message.error(`重命名失败: ${e.message}`)
+    }
+    setEditingDevice(null)
+  }
+
+  // 取消编辑
+  const handleCancelRename = () => {
+    setEditingDevice(null)
+    setEditingName('')
+  }
+
+  // 发送数据
+  const handleSend = async () => {
     if (!sendPanel.hexData) {
       message.warning('请输入要发送的十六进制数据')
       return
     }
-    message.success('数据已发送')
+    if (tcpStatus !== 'running') {
+      message.warning('服务器未运行')
+      return
+    }
+
+    try {
+      const params = {
+        hex_data: sendPanel.hexData
+      }
+
+      if (sendPanel.targetDevice) {
+        params.system_title = sendPanel.targetDevice
+      }
+
+      await sendTcpData(params)
+      message.success('数据已发送')
+    } catch (e) {
+      message.error(`发送失败: ${e.message}`)
+    }
   }
 
+  // 状态配置
   const statusConfig = {
     stopped: { status: 'default', text: '已停止', color: 'default' },
     starting: { status: 'processing', text: '启动中', color: 'blue' },
@@ -114,6 +315,17 @@ function StreamPage() {
   }
 
   const currentStatus = statusConfig[tcpStatus] || statusConfig.stopped
+
+  // 格式化时间
+  const formatTime = (timeStr) => {
+    if (!timeStr) return '-'
+    try {
+      const date = new Date(timeStr)
+      return date.toLocaleTimeString('zh-CN', { hour12: false })
+    } catch {
+      return timeStr
+    }
+  }
 
   return (
     <div className="page-container">
@@ -124,14 +336,23 @@ function StreamPage() {
           <Space>
             <ThunderboltOutlined />
             <Title level={5} style={{ margin: 0 }}>
-              实时流 / TCP 管理
+              实时流 / {tcpConfig.protocol.toUpperCase()} 管理
             </Title>
             <Badge status={currentStatus.status} text={currentStatus.text} />
           </Space>
         }
         extra={
           <Space>
-            <Text type="secondary">端口: {tcpPort}</Text>
+            <Text type="secondary">
+              {tcpConfig.protocol.toUpperCase()} · 端口 {tcpConfig.port}
+            </Text>
+            <Button
+              size="small"
+              icon={<SettingOutlined />}
+              onClick={handleOpenConfig}
+            >
+              配置
+            </Button>
             {tcpStatus === 'running' || tcpStatus === 'stopping' ? (
               <Button
                 danger
@@ -161,39 +382,104 @@ function StreamPage() {
               <Space align="center" style={{ marginBottom: 8 }}>
                 <DesktopOutlined />
                 <Text strong>已连接设备</Text>
-                <Tag color="green">{mockDevices.length}</Tag>
+                <Tag color="green">{connectedDevices.length}</Tag>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ReloadOutlined />}
+                  onClick={loadDevices}
+                  loading={loadingDevices}
+                  disabled={tcpStatus !== 'running'}
+                />
               </Space>
             </div>
             <div style={{ overflow: 'auto', height: 'calc(100% - 44px)' }}>
-              {mockDevices.length > 0 ? (
+              {connectedDevices.length > 0 ? (
                 <List
-                  dataSource={mockDevices}
-                  renderItem={(device) => (
-                    <List.Item style={{ padding: '12px 16px', cursor: 'pointer' }}>
-                      <List.Item.Meta
-                        avatar={<DesktopOutlined style={{ fontSize: 20, color: '#52c41a' }} />}
-                        title={
-                          <Space>
-                            <Text strong>{device.id}</Text>
-                            <Badge status="success" />
-                          </Space>
-                        }
-                        description={
-                          <Space direction="vertical" size={0}>
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              {device.address}
-                            </Text>
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              WPort: {device.wport}
-                            </Text>
-                          </Space>
-                        }
-                      />
-                    </List.Item>
-                  )}
+                  dataSource={connectedDevices}
+                  renderItem={(device) => {
+                    const displayName = device.device_name || device.system_title || device.connection_id
+                    const isEditing = editingDevice === (device.system_title || device.connection_id)
+
+                    return (
+                      <List.Item
+                        style={{ padding: '12px 16px', cursor: 'pointer' }}
+                        actions={[
+                          <Button
+                            key="rename"
+                            size="small"
+                            type="text"
+                            icon={<EditOutlined />}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleStartRename(device)
+                            }}
+                          />
+                        ]}
+                      >
+                        <List.Item.Meta
+                          avatar={<DesktopOutlined style={{ fontSize: 20, color: device.connected ? '#52c41a' : '#999' }} />}
+                          title={
+                            <Space>
+                              {isEditing ? (
+                                <Input
+                                  size="small"
+                                  value={editingName}
+                                  onChange={(e) => setEditingName(e.target.value)}
+                                  onPressEnter={() => handleSaveRename(device)}
+                                  style={{ width: 120 }}
+                                  autoFocus
+                                  suffix={
+                                    <Space size={4}>
+                                      <Button
+                                        size="small"
+                                        type="text"
+                                        icon={<CheckOutlined />}
+                                        onClick={() => handleSaveRename(device)}
+                                        style={{ padding: 0 }}
+                                      />
+                                      <Button
+                                        size="small"
+                                        type="text"
+                                        danger
+                                        icon={<CloseOutlined />}
+                                        onClick={handleCancelRename}
+                                        style={{ padding: 0 }}
+                                      />
+                                    </Space>
+                                  }
+                                />
+                              ) : (
+                                <Text strong>{displayName}</Text>
+                              )}
+                              <Badge status={device.connected ? 'success' : 'default'} />
+                            </Space>
+                          }
+                          description={
+                            <Space direction="vertical" size={0}>
+                              {device.system_title && (
+                                <Text type="secondary" style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                                  ST: {device.system_title}
+                                </Text>
+                              )}
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {device.ip}:{device.port}
+                              </Text>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                最后活动: {formatTime(device.last_seen)}
+                              </Text>
+                            </Space>
+                          }
+                        />
+                      </List.Item>
+                    )
+                  }}
                 />
               ) : (
-                <Empty description="暂无设备" style={{ marginTop: 40 }} />
+                <Empty
+                  description={tcpStatus === 'running' ? '暂无设备连接' : '服务器未启动'}
+                  style={{ marginTop: 40 }}
+                />
               )}
             </div>
           </Col>
@@ -204,12 +490,13 @@ function StreamPage() {
               <Space align="center">
                 <RocketOutlined />
                 <Text strong>帧时间线</Text>
+                <Tag>{frames.length}</Tag>
               </Space>
             </div>
             <div style={{ overflow: 'auto', height: 'calc(100% - 44px)', padding: 16 }}>
-              {displayFrames.length > 0 ? (
+              {frames.length > 0 ? (
                 <Timeline
-                  items={displayFrames.map((frame) => ({
+                  items={frames.map((frame) => ({
                     color: frame.direction === 'in' ? 'green' : 'blue',
                     children: (
                       <div
@@ -227,11 +514,16 @@ function StreamPage() {
                             <Tag color={frame.direction === 'in' ? 'green' : 'blue'}>
                               {frame.direction === 'in' ? '上行' : '下行'}
                             </Tag>
-                            <Tag>{frame.type}</Tag>
+                            <Tag>{frame.type || 'UNKNOWN'}</Tag>
                             <Text type="secondary" style={{ fontSize: 12 }}>
-                              {frame.length} bytes
+                              {frame.length || 0} bytes
                             </Text>
                           </Space>
+                          {frame.system_title && (
+                            <Text type="secondary" style={{ fontSize: 11, fontFamily: 'monospace' }}>
+                              设备: {frame.system_title}
+                            </Text>
+                          )}
                           <Text type="secondary" style={{ fontSize: 12 }}>
                             {frame.timestamp}
                           </Text>
@@ -273,13 +565,19 @@ function StreamPage() {
                           <div>
                             <Text type="secondary">帧类型:</Text>
                             <div>
-                              <Tag>{selectedFrame.type}</Tag>
+                              <Tag>{selectedFrame.type || 'UNKNOWN'}</Tag>
                             </div>
                           </div>
                           <div>
                             <Text type="secondary">长度:</Text>
-                            <div>{selectedFrame.length} bytes</div>
+                            <div>{selectedFrame.length || 0} bytes</div>
                           </div>
+                          {selectedFrame.system_title && (
+                            <div>
+                              <Text type="secondary">设备 System Title:</Text>
+                              <div style={{ fontFamily: 'monospace' }}>{selectedFrame.system_title}</div>
+                            </div>
+                          )}
                           <div>
                             <Text type="secondary">十六进制数据:</Text>
                             <div
@@ -290,7 +588,7 @@ function StreamPage() {
                                 wordBreak: 'break-all'
                               }}
                             >
-                              {selectedFrame.hex}
+                              {selectedFrame.hex || '(无数据)'}
                             </div>
                           </div>
                         </Space>
@@ -308,18 +606,24 @@ function StreamPage() {
                       <Space direction="vertical" size="middle" style={{ width: '100%', flex: 1 }}>
                         <div>
                           <Text type="secondary">目标设备:</Text>
-                          <select
-                            value={sendPanel.targetDevice || ''}
-                            onChange={(e) => setSendPanel({ targetDevice: e.target.value })}
-                            style={{ width: '100%', padding: '4px 8px', marginTop: 4 }}
+                          <Select
+                            value={sendPanel.targetDevice || undefined}
+                            onChange={(val) => setSendPanel({ targetDevice: val })}
+                            placeholder="选择设备（不选则广播）"
+                            style={{ width: '100%', marginTop: 4 }}
+                            allowClear
+                            disabled={connectedDevices.length === 0}
                           >
-                            <option value="">选择设备...</option>
-                            {mockDevices.map((d) => (
-                              <option key={d.id} value={d.id}>
-                                {d.id}
-                              </option>
+                            {connectedDevices.map((d) => (
+                              <Option
+                                key={d.system_title || d.connection_id}
+                                value={d.system_title || d.connection_id}
+                              >
+                                {d.device_name || d.system_title || d.connection_id}
+                                {d.ip ? ` (${d.ip})` : ''}
+                              </Option>
                             ))}
-                          </select>
+                          </Select>
                         </div>
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
                           <Text type="secondary">十六进制数据:</Text>
@@ -345,7 +649,13 @@ function StreamPage() {
                             自动递增Invocation Counter
                           </label>
                         </div>
-                        <Button type="primary" icon={<SendOutlined />} onClick={handleSend} block>
+                        <Button
+                          type="primary"
+                          icon={<SendOutlined />}
+                          onClick={handleSend}
+                          block
+                          disabled={tcpStatus !== 'running'}
+                        >
                           发送
                         </Button>
                       </Space>
@@ -357,6 +667,81 @@ function StreamPage() {
           </Col>
         </Row>
       </Card>
+
+      {/* 配置弹窗 */}
+      <Modal
+        title={
+          <Space>
+            <SettingOutlined />
+            <span>服务配置</span>
+          </Space>
+        }
+        open={configPanelVisible}
+        onCancel={() => setConfigPanelVisible(false)}
+        footer={null}
+        width={480}
+        destroyOnClose
+      >
+        <Form form={configForm} layout="vertical">
+          <Form.Item
+            name="protocol"
+            label="协议类型"
+            rules={[{ required: true, message: '请选择协议类型' }]}
+          >
+            <Select>
+              <Option value="tcp">TCP (面向连接)</Option>
+              <Option value="udp">UDP (无连接)</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item
+            name="port"
+            label="监听端口"
+            rules={[
+              { required: true, message: '请输入端口号' },
+              { type: 'number', min: 1, max: 65535, message: '端口号必须在 1-65535 之间' }
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} min={1} max={65535} />
+          </Form.Item>
+
+          <Form.Item
+            name="auto_start"
+            label="自动启动"
+            valuePropName="checked"
+          >
+            <Switch />
+          </Form.Item>
+
+          <Divider />
+
+          <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setConfigPanelVisible(false)}>取消</Button>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              onClick={handleSaveConfig}
+              loading={configSaving}
+            >
+              保存配置
+            </Button>
+            {tcpStatus === 'running' && (
+              <Popconfirm
+                title="重启服务器？"
+                description="重启后新配置将生效"
+                onConfirm={handleRestartServer}
+                okText="重启"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+              >
+                <Button danger icon={<ReloadOutlined />}>
+                  重启生效
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        </Form>
+      </Modal>
     </div>
   )
 }

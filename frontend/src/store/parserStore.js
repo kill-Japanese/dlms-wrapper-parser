@@ -10,15 +10,16 @@ const loadSecurityConfig = () => {
     if (saved) {
       const parsed = JSON.parse(saved)
       return {
-        guek: parsed.guek || '',
-        gubk: parsed.gubk || '',
-        ak: parsed.ak || '',
-        kek: parsed.kek || '',
+        guek: parsed.guek || '',          // EK - Encryption Key (GUEK)
+        gubk: parsed.gubk || '',          // Broadcast Encryption Key (GUBK)
+        ak: parsed.ak || '',              // AK - Authentication Key
+        kek: parsed.kek || '',            // KEK - Key Encryption Key
         systemTitle: parsed.systemTitle || '',
         invocationCounter: parsed.invocationCounter ?? 0,
         useCiphering: parsed.useCiphering ?? true,
         useCompression: parsed.useCompression ?? true,
         selectedKeyType: parsed.selectedKeyType || 'guek',
+        autoFillFromFrame: parsed.autoFillFromFrame ?? true,
         // 兼容旧字段
         blockCipherKey: parsed.blockCipherKey || parsed.guek || '',
         authenticationKey: parsed.authenticationKey || parsed.ak || ''
@@ -32,15 +33,16 @@ const loadSecurityConfig = () => {
 
 // 默认安全配置
 const defaultSecurityConfig = {
-  guek: '',                    // Global Unicast Encryption Key
-  gubk: '',                    // Global Unicast Broadcast Key
-  ak: '',                      // Authentication Key
-  kek: '',                     // Key Encryption Key
-  systemTitle: '',             // System Title
-  invocationCounter: 0,        // Invocation Counter
+  guek: '',                    // EK - Global Unicast Encryption Key (加密密钥)
+  gubk: '',                    // GUBK - Global Unicast Broadcast Key (广播加密密钥)
+  ak: '',                      // AK - Authentication Key (认证密钥)
+  kek: '',                     // KEK - Key Encryption Key (密钥加密密钥)
+  systemTitle: '',             // System Title (系统标题，8字节十六进制)
+  invocationCounter: 0,        // Invocation Counter (调用计数器)
   useCiphering: true,          // 启用加密
   useCompression: true,        // 启用压缩
   selectedKeyType: 'guek',     // 当前选中的密钥类型: 'guek' | 'gubk' | 'custom'
+  autoFillFromFrame: true,     // 解析后自动从帧中回填 ST/IC
   // 兼容旧字段
   blockCipherKey: '',
   authenticationKey: ''
@@ -114,7 +116,8 @@ const useParserStore = create((set, get) => ({
         invocationCounter: newConfig.invocationCounter,
         useCiphering: newConfig.useCiphering,
         useCompression: newConfig.useCompression,
-        selectedKeyType: newConfig.selectedKeyType
+        selectedKeyType: newConfig.selectedKeyType,
+        autoFillFromFrame: newConfig.autoFillFromFrame,
       }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
     } catch (e) {
@@ -122,6 +125,35 @@ const useParserStore = create((set, get) => ({
     }
     return { securityConfig: newConfig }
   }),
+
+  // 从解析结果中自动回填 System Title 和 Invocation Counter
+  autoFillFromParseResult: (parseResult) => {
+    const state = get()
+    if (!state.securityConfig.autoFillFromFrame) return
+    if (!parseResult?.ciphering) return
+
+    const { system_title, invocation_counter, extracted_from_frame } = parseResult.ciphering
+
+    if (extracted_from_frame && system_title) {
+      set((prev) => ({
+        securityConfig: {
+          ...prev.securityConfig,
+          systemTitle: system_title,
+          invocationCounter: invocation_counter ?? 0
+        }
+      }))
+      // 同步保存到 localStorage
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY)
+        const toSave = saved ? JSON.parse(saved) : {}
+        toSave.systemTitle = system_title
+        toSave.invocationCounter = invocation_counter ?? 0
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave))
+      } catch (e) {
+        console.warn('Failed to save auto-filled config to localStorage:', e)
+      }
+    }
+  },
 
   setSecurityPanelExpanded: (expanded) => set({ securityPanelExpanded: expanded }),
 

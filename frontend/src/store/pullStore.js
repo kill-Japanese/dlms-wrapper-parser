@@ -18,6 +18,9 @@ const loadPresetsFromStorage = () => {
       id: 'default-electricity',
       name: '电表基础数据',
       description: '读取电表的基础电能数据',
+      system_title: null,
+      device_name: null,
+      key_type: 'GUEK',
       operations: [
         { class_id: 3, obis: '1.0.1.8.0.255', attribute_id: 2, name: '有功总电能（正向）' },
         { class_id: 3, obis: '1.0.2.8.0.255', attribute_id: 2, name: '有功总电能（反向）' },
@@ -112,7 +115,13 @@ const usePullStore = create((set, get) => ({
   // 添加预设
   addPreset: (preset) => {
     set((state) => {
-      const newPresets = [...state.presets, preset]
+      const newPreset = {
+        system_title: null,
+        device_name: null,
+        key_type: 'GUEK',
+        ...preset
+      }
+      const newPresets = [...state.presets, newPreset]
       savePresetsToStorage(newPresets)
       return { presets: newPresets }
     })

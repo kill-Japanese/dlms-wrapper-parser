@@ -134,12 +134,23 @@ def parse_frame(
 
                 if has_any_key:
                     # 使用密钥字典，根据key_id自动选择密钥
+                    # System Title 和 Invocation Counter 从帧中自动提取
                     plaintext, cipher_frame = parse_ciphered(
                         payload,
                         key=single_key_bytes,
                         keys=keys_dict if len(keys_dict) > 1 else None,
                     )
                     result.ciphering = cipher_frame
+
+                    # 记录从帧中提取的信息
+                    log_manager.info(
+                        frame_id, "ciphering",
+                        f"从帧中提取 System Title: {cipher_frame.system_title}"
+                    )
+                    log_manager.info(
+                        frame_id, "ciphering",
+                        f"从帧中提取 Invocation Counter: {cipher_frame.invocation_counter}"
+                    )
 
                     # 记录使用的密钥类型
                     key_id = cipher_frame.cipher_info.key_id if cipher_frame.cipher_info else 0
@@ -149,6 +160,24 @@ def parse_frame(
                         frame_id, "ciphering",
                         f"使用密钥类型: {key_type}"
                     )
+
+                    # 记录SC字节各标志位
+                    if cipher_frame.cipher_info:
+                        ci = cipher_frame.cipher_info
+                        flags = []
+                        if ci.encrypted:
+                            flags.append("加密")
+                        if ci.authenticated:
+                            flags.append("认证")
+                        if ci.compressed:
+                            flags.append("压缩")
+                        if ci.ecc_signed:
+                            flags.append("ECC签名")
+                        if flags:
+                            log_manager.info(
+                                frame_id, "ciphering",
+                                f"安全控制标志: {', '.join(flags)}"
+                            )
 
                     if cipher_frame.decrypt_success:
                         log_manager.info(
@@ -164,6 +193,15 @@ def parse_frame(
                     plaintext, cipher_frame = parse_ciphered(payload, None)
                     result.ciphering = cipher_frame
                     log_manager.warn(frame_id, "ciphering", "未提供密钥，无法解密")
+                    # 记录从帧中提取的信息（即使未解密也展示
+                    log_manager.info(
+                        frame_id, "ciphering",
+                        f"从帧中提取 System Title: {cipher_frame.system_title}"
+                    )
+                    log_manager.info(
+                        frame_id, "ciphering",
+                        f"从帧中提取 Invocation Counter: {cipher_frame.invocation_counter}"
+                    )
                     # 无法继续解析APDU
                     result.parse_logs = _convert_logs(log_manager.get_logs(frame_id))
                     return result

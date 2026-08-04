@@ -110,9 +110,13 @@ const useDataModelStore = create((set, get) => ({
 
       const result = await getDataModelList(queryParams)
 
+      // 防御性编程：确保 result 是数组
+      // 后端 /list 接口应返回数组，但某些异常情况下可能返回对象
+      const dataList = Array.isArray(result) ? result : (result?.data || result?.results || [])
+
       // 过滤出对象本身（attribute_id=0 或 attribute_id=null）
       // 后端返回的是扁平列表，我们只取 attribute_id=0 的对象作为列表项
-      const objectHeaders = result.filter(
+      const objectHeaders = dataList.filter(
         (obj) => obj.attribute_id === 0 || obj.attribute_id === null
       )
 

@@ -18,7 +18,8 @@ function ParseControls() {
     loading,
     securityConfig,
     addToHistory,
-    reset
+    reset,
+    autoFillFromParseResult
   } = useParserStore()
 
   const handleParse = async () => {
@@ -38,6 +39,9 @@ function ParseControls() {
         direction,
         success: true
       })
+
+      // 从解析结果中自动回填 System Title 和 Invocation Counter
+      autoFillFromParseResult(result)
 
       if (result.errors && result.errors.length > 0) {
         message.warning(`解析完成，但有 ${result.errors.length} 个警告`)
