@@ -71,11 +71,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS中间件配置 - 允许所有来源
+# CORS中间件配置 - 允许所有来源（不使用凭据，避免 * + credentials 的CORS限制）
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
