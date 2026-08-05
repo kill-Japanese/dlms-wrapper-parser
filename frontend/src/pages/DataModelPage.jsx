@@ -17,7 +17,8 @@ import {
   Table,
   Tooltip,
   Divider,
-  Alert
+  Alert,
+  Modal
 } from 'antd'
 import {
   UploadOutlined,
@@ -27,7 +28,8 @@ import {
   FileTextOutlined,
   CodeOutlined,
   InfoCircleOutlined,
-  WarningOutlined
+  WarningOutlined,
+  GithubOutlined
 } from '@ant-design/icons'
 import useDataModelStore from '../store/datamodelStore.js'
 
@@ -211,6 +213,7 @@ function DataModelPage() {
     selectedClassId,
     loading,
     uploading,
+    importingGithub,
     uploadProgress,
     detailLoading,
     totalObjects,
@@ -222,6 +225,7 @@ function DataModelPage() {
     setSelectedClassId,
     checkStatus,
     uploadFile,
+    importFromGithub,
     loadObjects,
     search,
     selectObject
@@ -229,6 +233,10 @@ function DataModelPage() {
 
   const [searchInput, setSearchInput] = useState('')
   const [searchTimer, setSearchTimer] = useState(null)
+  const [githubModalVisible, setGithubModalVisible] = useState(false)
+  const [githubUrl, setGithubUrl] = useState(
+    'https://raw.githubusercontent.com/kill-Japanese/dlms-wrapper-parser/main/sample_data/cosem_data_model.xlsx'
+  )
 
   // 页面加载时检查状态
   useEffect(() => {
@@ -290,6 +298,23 @@ function DataModelPage() {
     }
     return false // 阻止自动上传
   }, [uploadFile])
+
+  // 处理 GitHub 导入
+  const handleGithubImport = useCallback(async () => {
+    if (!githubUrl.trim()) {
+      message.warning('请输入 GitHub Raw URL')
+      return
+    }
+    try {
+      const hide = message.loading('正在从 GitHub 下载并解析数模文件...', 0)
+      await importFromGithub(githubUrl.trim())
+      hide()
+      message.success('数据模型导入成功！')
+      setGithubModalVisible(false)
+    } catch (err) {
+      message.error(`导入失败: ${err.message || '未知错误'}`)
+    }
+  }, [githubUrl, importFromGithub])
 
   // 处理选择对象
   const handleSelectObject = useCallback((obj) => {
@@ -403,15 +428,23 @@ function DataModelPage() {
           </Space>
         }
         extra={
-          <Upload
-            beforeUpload={handleUpload}
-            showUploadList={false}
-            accept=".xlsx,.xls"
-          >
-            <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-              上传数模
+          <Space>
+            <Button
+              icon={<GithubOutlined />}
+              onClick={() => setGithubModalVisible(true)}
+            >
+              从 GitHub 导入
             </Button>
-          </Upload>
+            <Upload
+              beforeUpload={handleUpload}
+              showUploadList={false}
+              accept=".xlsx,.xls"
+            >
+              <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
+                上传数模
+              </Button>
+            </Upload>
+          </Space>
         }
         style={{ height: '100%' }}
         bodyStyle={{ height: 'calc(100% - 57px)', padding: 0 }}
@@ -440,17 +473,27 @@ function DataModelPage() {
                     尚未加载数据模型
                   </Text>
                   <Text type="secondary">
-                    请上传 COSEM 数据模型 Excel 文件以查看对象列表
+                    请上传 COSEM 数据模型 Excel 文件，或直接从 GitHub 导入示例数模
                   </Text>
-                  <Upload
-                    beforeUpload={handleUpload}
-                    showUploadList={false}
-                    accept=".xlsx,.xls"
-                  >
-                    <Button type="primary" icon={<UploadOutlined />} loading={uploading}>
-                      上传数模文件
+                  <Space>
+                    <Button
+                      type="primary"
+                      icon={<GithubOutlined />}
+                      onClick={() => setGithubModalVisible(true)}
+                      loading={importingGithub}
+                    >
+                      从 GitHub 导入示例数模
                     </Button>
-                  </Upload>
+                    <Upload
+                      beforeUpload={handleUpload}
+                      showUploadList={false}
+                      accept=".xlsx,.xls"
+                    >
+                      <Button icon={<UploadOutlined />} loading={uploading}>
+                        上传数模文件
+                      </Button>
+                    </Upload>
+                  </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     支持 .xlsx / .xls 格式（标准行式 或 SABESP 对象分组式）
                   </Text>
@@ -737,6 +780,51 @@ function DataModelPage() {
           </Row>
         )}
       </Card>
+
+      {/* GitHub 导入对话框 */}
+      <Modal
+        title={
+          <Space>
+            <GithubOutlined />
+            <span>从 GitHub 导入数据模型</span>
+          </Space>
+        }
+        open={githubModalVisible}
+        onOk={handleGithubImport}
+        onCancel={() => setGithubModalVisible(false)}
+        confirmLoading={importingGithub}
+        okText="导入"
+        cancelText="取消"
+        width={600}
+      >
+        <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+          <div>
+            <Text type="secondary">
+              输入 GitHub Raw 文件 URL，系统将自动下载并解析 COSEM 数据模型 Excel 文件。
+            </Text>
+          </div>
+          <Input
+            value={githubUrl}
+            onChange={(e) => setGithubUrl(e.target.value)}
+            placeholder="https://raw.githubusercontent.com/.../xxx.xlsx"
+            size="large"
+            onPressEnter={handleGithubImport}
+          />
+          <Alert
+            message="快速使用"
+            description={
+              <div>
+                <div>默认使用本仓库内置的示例数据模型，包含常用 COSEM 对象（电表类）。</div>
+                <div style={{ marginTop: 4, fontSize: 12, color: '#666' }}>
+                  提示：GitHub 文件 URL 需要是 raw 格式（raw.githubusercontent.com）
+                </div>
+              </div>
+            }
+            type="info"
+            showIcon
+          />
+        </Space>
+      </Modal>
     </div>
   )
 }

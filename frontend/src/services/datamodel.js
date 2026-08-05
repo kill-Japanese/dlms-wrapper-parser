@@ -46,8 +46,14 @@ export function getObjectDetail(class_id, obis) {
   return api.get(`/datamodel/object/${class_id}/${encodeURIComponent(obis)}`)
 }
 
+// 从 GitHub 导入数据模型
+export function importFromGithub(url) {
+  return api.post('/datamodel/import-github', { url })
+}
+
 export default {
   uploadDataModel,
+  importFromGithub,
   getDataModelList,
   getObjectHeaders,
   searchDataModel,

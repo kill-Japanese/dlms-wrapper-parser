@@ -3,7 +3,10 @@
 """
 import os
 import uuid
+import tempfile
+import urllib.request
 from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from pydantic import BaseModel, HttpUrl
 from typing import Optional
 
 from app.models.datamodel import (
@@ -18,6 +21,32 @@ from app.config import settings
 
 
 router = APIRouter(prefix="/api/datamodel", tags=["DataModel"])
+
+
+class GithubImportRequest(BaseModel):
+    """从 GitHub 导入数据模型的请求"""
+    url: str = "https://raw.githubusercontent.com/kill-Japanese/dlms-wrapper-parser/main/sample_data/cosem_data_model.xlsx"
+
+
+def _load_from_excel_bytes(excel_bytes: bytes, filename: str) -> DataModelUploadResponse:
+    """从 Excel 字节数据加载数据模型（通用方法）"""
+    # 保存到临时文件
+    file_id = str(uuid.uuid4())[:8]
+    temp_filename = f"{file_id}_{filename}"
+    file_path = os.path.join(settings.UPLOAD_DIR, temp_filename)
+
+    with open(file_path, "wb") as f:
+        f.write(excel_bytes)
+
+    # 加载数据模型
+    result = data_model_manager.load_excel(file_path)
+
+    return DataModelUploadResponse(
+        success=True,
+        total_objects=result["total_objects"],
+        classes=result["classes"],
+        message=f"成功加载 {result['total_objects']} 个对象",
+    )
 
 
 @router.post("/upload", response_model=DataModelUploadResponse, summary="上传数据模型Excel")
@@ -42,27 +71,53 @@ async def upload_datamodel(file: UploadFile = File(..., description="Excel文件
         raise HTTPException(status_code=400, detail="只支持 .xlsx 或 .xls 格式的Excel文件")
 
     try:
-        # 保存文件到上传目录
-        file_id = str(uuid.uuid4())[:8]
-        filename = f"{file_id}_{file.filename}"
-        file_path = os.path.join(settings.UPLOAD_DIR, filename)
-
         contents = await file.read()
-        with open(file_path, "wb") as f:
-            f.write(contents)
-
-        # 加载数据模型
-        result = data_model_manager.load_excel(file_path)
-
-        return DataModelUploadResponse(
-            success=True,
-            total_objects=result["total_objects"],
-            classes=result["classes"],
-            message=f"成功加载 {result['total_objects']} 个对象",
-        )
-
+        return _load_from_excel_bytes(contents, file.filename)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"上传失败: {e}")
+
+
+@router.post("/import-github", response_model=DataModelUploadResponse, summary="从 GitHub 导入数据模型")
+async def import_from_github(request: GithubImportRequest):
+    """
+    从 GitHub Raw URL 导入 COSEM 数据模型 Excel 文件
+
+    - **url**: GitHub Raw 文件 URL（默认使用仓库内置的示例数据模型）
+    """
+    url = request.url
+
+    # 简单校验 URL
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="无效的 URL 格式")
+
+    # 从 URL 中提取文件名
+    filename = url.split("/")[-1].split("?")[0]
+    if not filename.lower().endswith((".xlsx", ".xls")):
+        raise HTTPException(status_code=400, detail="URL 必须指向 .xlsx 或 .xls 文件")
+
+    try:
+        # 下载文件
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "DLMS-Wrapper-Parser/1.0"
+        })
+        with urllib.request.urlopen(req, timeout=30) as response:
+            if response.status != 200:
+                raise HTTPException(status_code=400, detail=f"下载失败: HTTP {response.status}")
+            contents = response.read()
+
+        if len(contents) == 0:
+            raise HTTPException(status_code=400, detail="下载的文件为空")
+
+        return _load_from_excel_bytes(contents, filename)
+
+    except HTTPException:
+        raise
+    except urllib.error.URLError as e:
+        raise HTTPException(status_code=400, detail=f"无法访问 URL: {e.reason}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"导入失败: {e}")
 
 
 @router.get("/list", response_model=list[CosemObject], summary="获取对象列表（所有条目）")

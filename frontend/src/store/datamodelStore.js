@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import {
   uploadDataModel,
+  importFromGithub as importFromGithubApi,
   getDataModelList,
   getObjectHeaders,
   searchDataModel,
@@ -39,6 +40,7 @@ const useDataModelStore = create((set, get) => ({
   // 加载状态
   loading: false,
   uploading: false,
+  importingGithub: false,
   uploadProgress: 0,
   detailLoading: false,
   error: null,
@@ -108,6 +110,39 @@ const useDataModelStore = create((set, get) => ({
       return result
     } catch (err) {
       set({ uploading: false, uploadProgress: 0, error: err.message || '上传失败' })
+      throw err
+    }
+  },
+
+  // ---- 从 GitHub 导入数模 ----
+  async importFromGithub(url) {
+    set({ importingGithub: true, error: null, usingFallbackApi: false })
+    try {
+      const result = await importFromGithubApi(url)
+
+      // 从 URL 提取文件名
+      const filename = url.split('/').pop()?.split('?')[0] || 'github_import.xlsx'
+
+      set({
+        importingGithub: false,
+        isLoaded: true,
+        totalObjects: result.total_objects || 0,
+        classes: result.classes || [],
+        sourceFile: filename
+      })
+
+      // 导入成功后加载对象列表
+      await get().loadObjects()
+
+      // 检查加载结果
+      const state = get()
+      if (state.objects.length === 0 && !state.error) {
+        set({ error: '导入成功但未解析到任何对象，请检查数据文件格式' })
+      }
+
+      return result
+    } catch (err) {
+      set({ importingGithub: false, error: err.message || '导入失败' })
       throw err
     }
   },
