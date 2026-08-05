@@ -27,6 +27,8 @@ General-Glo-Ciphering APDU 格式 (BER-encoded):
 from typing import Optional, Tuple, Dict
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
 
 from app.models.cipher import CipherFrame, CipherInfo
 from app.utils.hex_utils import bytes_to_hex, hex_to_bytes
@@ -255,6 +257,129 @@ def _compute_aad(sc_byte: int, system_title: bytes = None) -> bytes:
     return aad
 
 
+def _aes_gcm_decrypt(
+    key: bytes,
+    nonce: bytes,
+    ciphertext: bytes,
+    tag: bytes,
+    aad: bytes = b"",
+) -> bytes:
+    """
+    AES-GCM 解密，支持任意长度的 GMAC tag
+
+    使用底层 Cipher API 而不是 AESGCM 类，
+    因为 AESGCM 类只支持 16 字节 tag，
+    而 DLMS Suite 1 使用 12 字节 tag。
+
+    Args:
+        key: 16字节 AES 密钥
+        nonce: 12字节 Nonce/IV
+        ciphertext: 密文数据
+        tag: GMAC 认证标签（可以是12/16字节等）
+        aad: 关联认证数据
+
+    Returns:
+        明文数据
+
+    Raises:
+        Exception: 认证失败或解密失败
+    """
+    tag_len = len(tag)
+    cipher = Cipher(
+        algorithms.AES(key),
+        modes.GCM(nonce, tag, min_tag_length=tag_len),
+        backend=default_backend()
+    )
+    decryptor = cipher.decryptor()
+    decryptor.authenticate_additional_data(aad)
+    plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+    return plaintext
+
+
+def _aes_gcm_encrypt(
+    key: bytes,
+    nonce: bytes,
+    plaintext: bytes,
+    aad: bytes = b"",
+    tag_length: int = 12,
+) -> Tuple[bytes, bytes]:
+    """
+    AES-GCM 加密，支持指定 tag 长度
+
+    Args:
+        key: 16字节 AES 密钥
+        nonce: 12字节 Nonce/IV
+        plaintext: 明文数据
+        aad: 关联认证数据
+        tag_length: tag长度（默认12字节，DLMS Suite 1）
+
+    Returns:
+        (ciphertext, tag): 密文和GMAC标签
+    """
+    cipher = Cipher(
+        algorithms.AES(key),
+        modes.GCM(nonce, min_tag_length=tag_length),
+        backend=default_backend()
+    )
+    encryptor = cipher.encryptor()
+    encryptor.authenticate_additional_data(aad)
+    ciphertext = encryptor.update(plaintext) + encryptor.finalize()
+    tag = encryptor.tag[:tag_length]
+    return ciphertext, tag
+
+
+def _try_decrypt_with_multiple_aads(
+    key: bytes,
+    nonce: bytes,
+    ciphered_data: bytes,
+    gmac_tag: bytes,
+    sc_byte: int,
+    system_title: bytes,
+    invocation_counter: int,
+) -> Tuple[bytes, str]:
+    """
+    尝试用多种 AAD 构造方式解密
+
+    DLMS 不同厂商的 AAD 构造可能不同，依次尝试：
+    1. AAD = SC byte (最常见)
+    2. AAD = SC byte + System Title (部分厂商)
+    3. AAD = SC byte + System Title + IC (少数厂商)
+
+    Args:
+        key: 密钥
+        nonce: Nonce/IV
+        ciphered_data: 密文
+        gmac_tag: GMAC标签
+        sc_byte: Security Control字节
+        system_title: System Title
+        invocation_counter: 调用计数器
+
+    Returns:
+        (plaintext, aad_description): 明文和使用的AAD描述
+        如果所有方式都失败，抛出异常
+    """
+    # 构造不同的AAD进行尝试
+    aad_attempts = [
+        (bytes([sc_byte]), "SC byte (1B)"),
+        (bytes([sc_byte]) + system_title, "SC + System Title (9B)"),
+        (bytes([sc_byte]) + system_title + invocation_counter.to_bytes(4, "big"), "SC + ST + IC (13B)"),
+        (system_title + bytes([sc_byte]), "System Title + SC (9B)"),
+    ]
+
+    for aad, desc in aad_attempts:
+        try:
+            print(f"[CIPHER DEBUG]   尝试 AAD={desc}: {bytes_to_hex(aad)}")
+            plaintext = _aes_gcm_decrypt(key, nonce, ciphered_data, gmac_tag, aad)
+            print(f"[CIPHER DEBUG]   ✅ AAD={desc} 解密成功!")
+            return plaintext, desc
+        except Exception as e:
+            print(f"[CIPHER DEBUG]   ❌ AAD={desc} 失败: {type(e).__name__}")
+            continue
+
+    # 所有方式都失败，抛出最后一个异常
+    raise Exception("所有AAD构造方式都解密失败")
+
+
 def parse_ciphered(
     data: bytes,
     key: Optional[bytes] = None,
@@ -400,38 +525,44 @@ def parse_ciphered(
     print(f"\n[CIPHER DEBUG] --- 开始解密 ---")
     decrypt_success = False
     plaintext = b""
+    aad_used = ""
 
     if cipher_info.encrypted and active_key is not None:
         try:
             gcm_key = _derive_gcm_key(active_key)
             print(f"[CIPHER DEBUG] AES-GCM 密钥 (16B): {bytes_to_hex(gcm_key)}")
-
-            aesgcm = AESGCM(gcm_key)
+            print(f"[CIPHER DEBUG] GMAC Tag 长度: {len(gmac_tag)} bytes")
+            print(f"[CIPHER DEBUG] 使用底层Cipher API（支持12字节tag）")
 
             if cipher_info.authenticated:
-                # 带认证标签：密文 + 12字节GMAC tag
-                ciphertext_with_tag = ciphered_data + gmac_tag
-                print(f"[CIPHER DEBUG] 密文+Tag长度: {len(ciphertext_with_tag)} bytes")
-                print(f"[CIPHER DEBUG] 调用 AESGCM.decrypt(nonce, ciphertext+tag, aad)")
-                plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, aad)
+                # 带认证标签，尝试多种AAD构造
+                print(f"[CIPHER DEBUG] 尝试多种AAD构造方式:")
+                plaintext, aad_used = _try_decrypt_with_multiple_aads(
+                    gcm_key, nonce, ciphered_data, gmac_tag,
+                    sc_byte, system_title, invocation_counter
+                )
             else:
-                # 仅加密（DLMS中通常同时加密和认证）
-                print(f"[CIPHER DEBUG] 密文长度: {len(ciphered_data)} bytes (未认证)")
-                print(f"[CIPHER DEBUG] 调用 AESGCM.decrypt(nonce, ciphertext, aad)")
-                plaintext = aesgcm.decrypt(nonce, ciphered_data, aad)
+                # 仅加密（不认证），不需要tag验证
+                print(f"[CIPHER DEBUG] 未认证模式，直接解密")
+                # 使用AAD=SC
+                aad = bytes([sc_byte])
+                plaintext = _aes_gcm_decrypt(gcm_key, nonce, ciphered_data, b"", aad)
+                aad_used = "SC byte (1B, no auth)"
 
             decrypt_success = True
-            print(f"[CIPHER DEBUG] ✅ 解密成功!")
+            print(f"[CIPHER DEBUG] ✅ 解密成功! (AAD={aad_used})")
             print(f"[CIPHER DEBUG] 明文长度: {len(plaintext)} bytes")
             print(f"[CIPHER DEBUG] 明文前16字节: {bytes_to_hex(plaintext[:16])}")
+            if len(plaintext) >= 16:
+                print(f"[CIPHER DEBUG] 明文后16字节: {bytes_to_hex(plaintext[-16:])}")
         except Exception as e:
             decrypt_success = False
             plaintext = b""
             print(f"[CIPHER DEBUG] ❌ 解密失败: {e}")
             print(f"[CIPHER DEBUG] 可能的原因:")
-            print(f"  1. 密钥不正确")
+            print(f"  1. 密钥不正确（最常见）")
             print(f"  2. Nonce/IV 计算错误")
-            print(f"  3. AAD 构造错误")
+            print(f"  3. AAD 构造错误（已尝试4种常见方式）")
             print(f"  4. GMAC Tag 长度或位置不对")
             print(f"  5. 密文数据不完整")
     elif not cipher_info.encrypted:
@@ -535,26 +666,25 @@ def build_ciphered(
         # 不加密也不认证，直接附加明文
         cs_content = bytes([sc_byte]) + ic_bytes + apdu
     else:
-        # 使用AES-GCM加密
+        # 使用AES-GCM加密（12字节tag，符合DLMS Suite 1规范）
         if active_key is None:
             raise CipheringError("加密需要提供密钥")
 
         gcm_key = _derive_gcm_key(active_key)
-        aesgcm = AESGCM(gcm_key)
 
         # Nonce = System Title (8字节) + Invocation Counter (4字节) = 12字节
         nonce = system_title + ic_bytes
         nonce = nonce[:12]
 
-        # 关联数据
+        # 关联数据 = SC字节
         aad = bytes([sc_byte])
 
-        # 加密并生成认证标签
-        ciphertext_with_tag = aesgcm.encrypt(nonce, apdu, aad)
+        # 加密并生成12字节认证标签（DLMS Suite 1标准）
+        ciphertext, tag = _aes_gcm_encrypt(gcm_key, nonce, apdu, aad, tag_length=12)
 
         # 构建 ciphered-service 内容
-        # SC(1) + IC(4) + ciphertext + tag
-        cs_content = bytes([sc_byte]) + ic_bytes + ciphertext_with_tag
+        # SC(1) + IC(4) + ciphertext + tag(12)
+        cs_content = bytes([sc_byte]) + ic_bytes + ciphertext + tag
 
     # 构建 ciphered-service OCTET STRING（带BER长度）
     cs_length = len(cs_content)
