@@ -18,6 +18,30 @@ from app.utils.hex_utils import hex_to_bytes, bytes_to_hex
 router = APIRouter(prefix="/api/parse", tags=["Parse"])
 
 
+@router.get("/push-setup-versions", summary="获取 Push Setup (Class 40) 所有版本信息")
+async def get_push_setup_versions():
+    """
+    获取 Push Setup (Class 40) 的所有版本信息，包括：
+    - 版本号和版本名称
+    - 版本描述
+    - Push object list 结构
+    - 各版本属性列表
+    """
+    from app.utils.push_setup_versions import get_all_versions
+    
+    versions = []
+    for v in get_all_versions():
+        versions.append({
+            "version": v.version,
+            "version_name": v.version_name,
+            "description": v.description,
+            "push_object_list_structure": v.push_object_list_structure,
+            "attributes": v.attributes,
+        })
+    
+    return {"versions": versions, "count": len(versions)}
+
+
 @router.post("/hex", response_model=ParseResult, summary="解析十六进制帧数据")
 async def parse_hex(request: ParseRequest):
     """
