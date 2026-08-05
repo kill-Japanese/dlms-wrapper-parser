@@ -246,6 +246,8 @@ def parse_frame(
                             "algorithm": "V.44",
                             "compressed_size": len(payload),
                             "original_size": len(decompressed),
+                            "ratio": round(len(payload) / len(decompressed), 4) if decompressed else 0,
+                            "decompressed": True,
                         }
                         payload = decompressed
                     except Exception as e:

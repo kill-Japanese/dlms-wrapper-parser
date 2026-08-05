@@ -121,23 +121,43 @@ const formatValue = (item) => {
 function APDULayer({ data }) {
   if (!data) return null
 
-  const { type, invokeId, data: apduData, result } = data
+  // 后端返回 snake_case 字段名
+  const { tag, type_name, invoke_id, raw_hex, items, apdu_type } = data
 
-  const treeData = apduData ? convertToTreeData(apduData) : []
+  // 优先使用 apdu_type 或 type_name
+  const displayType = apdu_type || type_name || `Tag 0x${tag?.toString(16).padStart(2, '0').toUpperCase()}`
+
+  const treeData = items && items.length > 0 ? convertToTreeData({ type: 'array', value: items }) : []
 
   return (
     <div>
-      <Space style={{ marginBottom: 12 }}>
-        <Tag color="purple">{type}</Tag>
-        {invokeId !== undefined && (
-          <Tag>Invoke ID: {invokeId}</Tag>
+      <Space style={{ marginBottom: 12 }} wrap>
+        <Tag color="purple">{displayType}</Tag>
+        {invoke_id !== undefined && invoke_id !== null && (
+          <Tag>Invoke ID: {invoke_id}</Tag>
         )}
-        {result && (
-          <Tag color={result === 'success' ? 'success' : 'error'}>
-            {result}
-          </Tag>
+        {tag !== undefined && (
+          <Tag color="cyan">Tag: 0x{tag?.toString(16).padStart(2, '0').toUpperCase()}</Tag>
         )}
       </Space>
+
+      {raw_hex && (
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary" style={{ fontSize: 12 }}>原始数据:</Text>
+          <div style={{ 
+            marginTop: 4, 
+            maxHeight: 60, 
+            overflow: 'auto',
+            padding: 6,
+            background: '#fafafa',
+            borderRadius: 4,
+            fontFamily: 'monospace',
+            fontSize: 12
+          }}>
+            {raw_hex}
+          </div>
+        </div>
+      )}
 
       {treeData.length > 0 ? (
         <div
@@ -161,7 +181,7 @@ function APDULayer({ data }) {
       ) : (
         <Empty
           image={<ApiOutlined style={{ fontSize: 32, color: '#d9d9d9' }} />}
-          description="无数据结构"
+          description="无解析数据结构"
           style={{ padding: 20 }}
         />
       )}

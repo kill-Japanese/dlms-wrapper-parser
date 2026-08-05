@@ -7,17 +7,19 @@ const { Text } = Typography
 function CompressionLayer({ data }) {
   if (!data) return null
 
-  const { enabled, algorithm, originalSize, compressedSize, ratio, decompressed } = data
+  // 后端返回 snake_case 字段名
+  const { algorithm, original_size, compressed_size, ratio, decompressed } = data
 
   const compressionPercent = ratio ? Math.round((1 - ratio) * 100) : 0
+  const isCompressed = compressed_size && original_size && compressed_size < original_size
 
   return (
     <div>
       <Space style={{ marginBottom: 12 }}>
-        {enabled ? (
-          <Tag color="success" icon={<CompressOutlined />}>
-            {decompressed ? '已解压' : '已压缩'}
-          </Tag>
+        {decompressed ? (
+          <Tag color="success" icon={<CompressOutlined />}>已解压</Tag>
+        ) : isCompressed ? (
+          <Tag color="warning" icon={<CompressOutlined />}>已压缩</Tag>
         ) : (
           <Tag color="default">未压缩</Tag>
         )}
@@ -31,7 +33,7 @@ function CompressionLayer({ data }) {
         <Descriptions.Item label="状态">
           {decompressed ? (
             <Tag color="success">已解压</Tag>
-          ) : enabled ? (
+          ) : isCompressed ? (
             <Tag color="warning">已压缩</Tag>
           ) : (
             <Tag color="default">未压缩</Tag>
@@ -40,13 +42,13 @@ function CompressionLayer({ data }) {
         <Descriptions.Item label="原始大小">
           <Space>
             <ArrowsAltOutlined />
-            <Text strong>{formatBytes(originalSize)}</Text>
+            <Text strong>{formatBytes(original_size)}</Text>
           </Space>
         </Descriptions.Item>
         <Descriptions.Item label="压缩后大小">
           <Space>
             <CompressOutlined />
-            <Text strong>{formatBytes(compressedSize)}</Text>
+            <Text strong>{formatBytes(compressed_size)}</Text>
           </Space>
         </Descriptions.Item>
       </Descriptions>
