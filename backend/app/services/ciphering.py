@@ -336,6 +336,7 @@ def _try_decrypt_with_multiple_aads(
     sc_byte: int,
     system_title: bytes,
     invocation_counter: int,
+    ak: Optional[bytes] = None,
 ) -> Tuple[bytes, str]:
     """
     尝试用多种 AAD 构造方式解密
@@ -344,6 +345,8 @@ def _try_decrypt_with_multiple_aads(
     1. AAD = SC byte (最常见)
     2. AAD = SC byte + System Title (部分厂商)
     3. AAD = SC byte + System Title + IC (少数厂商)
+    4. AAD = SC byte + AK (部分厂商使用认证密钥参与AAD)
+    5. AAD = System Title + SC (部分厂商)
 
     Args:
         key: 密钥
@@ -353,6 +356,7 @@ def _try_decrypt_with_multiple_aads(
         sc_byte: Security Control字节
         system_title: System Title
         invocation_counter: 调用计数器
+        ak: Authentication Key (认证密钥，可选)
 
     Returns:
         (plaintext, aad_description): 明文和使用的AAD描述
@@ -365,6 +369,12 @@ def _try_decrypt_with_multiple_aads(
         (bytes([sc_byte]) + system_title + invocation_counter.to_bytes(4, "big"), "SC + ST + IC (13B)"),
         (system_title + bytes([sc_byte]), "System Title + SC (9B)"),
     ]
+
+    # 如果有 AK，添加包含 AK 的 AAD 尝试
+    if ak is not None:
+        aad_attempts.insert(1, (bytes([sc_byte]) + ak, "SC + AK (17B)"))
+        aad_attempts.append((ak + bytes([sc_byte]), "AK + SC (17B)"))
+        aad_attempts.append((bytes([sc_byte]) + system_title + ak, "SC + ST + AK (25B)"))
 
     for aad, desc in aad_attempts:
         try:
@@ -504,17 +514,24 @@ def parse_ciphered(
     print(f"\n[CIPHER DEBUG] --- 选择密钥 ---")
     active_key = key
     active_key_name = "default (param key)"
+    ak_key = None
     if keys is not None:
         selected_key = select_key_by_key_set(cipher_info.key_id, keys)
         if selected_key is not None:
             active_key = selected_key
             key_set_names = {0: "GUEK (Unicast)", 1: "GUBK (Broadcast)"}
             active_key_name = key_set_names.get(cipher_info.key_id, f"key_set={cipher_info.key_id}")
+        # 提取 AK 用于 AAD 构造
+        ak_key = keys.get("ak")
     print(f"[CIPHER DEBUG] 使用密钥: {active_key_name}")
     if active_key is not None:
         print(f"[CIPHER DEBUG] 密钥值: {bytes_to_hex(active_key)}")
     else:
         print(f"[CIPHER DEBUG] 密钥值: None (未提供密钥)")
+    if ak_key is not None:
+        print(f"[CIPHER DEBUG] AK 密钥: {bytes_to_hex(ak_key)} (将用于AAD尝试)")
+    else:
+        print(f"[CIPHER DEBUG] AK 密钥: None (未提供)")
 
     # 6. 计算 Nonce 和 AAD
     print(f"\n[CIPHER DEBUG] --- 计算 AES-GCM 参数 ---")
@@ -539,7 +556,8 @@ def parse_ciphered(
                 print(f"[CIPHER DEBUG] 尝试多种AAD构造方式:")
                 plaintext, aad_used = _try_decrypt_with_multiple_aads(
                     gcm_key, nonce, ciphered_data, gmac_tag,
-                    sc_byte, system_title, invocation_counter
+                    sc_byte, system_title, invocation_counter,
+                    ak=ak_key
                 )
             else:
                 # 仅加密（不认证），不需要tag验证
