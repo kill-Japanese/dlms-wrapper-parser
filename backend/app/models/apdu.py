@@ -34,6 +34,7 @@ class CosemDataItem(BaseModel):
     obis_bytes: bytes = Field(default=b"", description="OBIS码原始字节")
     attribute_id: int = Field(description="属性ID")
     data_type: str = Field(default="", description="数据类型")
+    type: str = Field(default="", description="数据类型（别名，兼容前端）")
     value: Any = Field(default=None, description="数据值")
     raw_hex: str = Field(default="", description="原始十六进制数据")
 
@@ -76,6 +77,7 @@ class DataNotificationAPDU(APDUBase):
     items: List[CosemDataItem] = Field(default_factory=list, description="数据项列表")
     notification_body_hex: str = Field(default="", description="通知体原始数据")
     item_count: int = Field(default=0, description="数据项数量")
+    parse_warnings: List[str] = Field(default_factory=list, description="解析过程中的警告信息")
 
 
 class DataNotificationConfirmAPDU(APDUBase):
