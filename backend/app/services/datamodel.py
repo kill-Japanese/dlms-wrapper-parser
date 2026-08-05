@@ -109,18 +109,42 @@ class DataModelManager:
             object_model_sheet = self._find_object_model_sheet(wb)
             wb.close()  # 检测完就关闭，dlms-model-parser 自己打开
             count = self._load_object_model_format(file_path, object_model_sheet)
+
+            # 如果 object_model 解析出 0 个对象，回退尝试 SABESP 和标准格式
+            if count == 0:
+                logger = logging.getLogger(__name__)
+                logger.warning("object_model 格式解析出 0 个对象，尝试回退到 SABESP 格式")
+                wb = load_workbook(file_path, read_only=True, data_only=True)
+                sabesp_sheet = self._find_object_model_sheet(wb)
+                if sabesp_sheet:
+                    count = self._load_sabesp_format(wb, sabesp_sheet)
+                if count == 0:
+                    count = self._load_standard_format(wb)
+                wb.close()
+                if count > 0:
+                    format_type = "sabesp" if sabesp_sheet else "standard"
         elif format_type == "sabesp":
-            count = self._load_sabesp_format(wb)
+            sabesp_sheet = self._find_object_model_sheet(wb)
+            if sabesp_sheet:
+                count = self._load_sabesp_format(wb, sabesp_sheet)
             wb.close()
         else:
             count = self._load_standard_format(wb)
             wb.close()
 
         if count == 0:
-            raise ValueError(
-                "未能从Excel文件中解析出任何对象。"
-                "请检查文件格式是否正确（支持标准行式和SABESP对象分组式）。"
-            )
+            # 不抛出异常，返回空结果，由调用方判断
+            logger = logging.getLogger(__name__)
+            logger.warning(f"从Excel中解析出 0 个对象 (format: {format_type})")
+            self._loaded = True
+            self._source_file = file_path
+            return {
+                "total_objects": 0,
+                "classes": [],
+                "source_file": os.path.basename(file_path),
+                "format": format_type,
+                "warning": "未能从Excel文件中解析出任何对象，请检查文件格式",
+            }
 
         self._loaded = True
         self._source_file = file_path
@@ -152,28 +176,13 @@ class DataModelManager:
         if object_model_sheet and is_parser_available():
             return "object_model"
 
-        # 2. 检查精确匹配 "Object model" 的 sheet（SABESP 格式，向后兼容）
-        if "Object model" in wb.sheetnames:
-            ws = wb["Object model"]
-            # 检查前几行是否符合SABESP格式特征
-            for i, row in enumerate(ws.iter_rows(min_row=1, max_row=15, values_only=True)):
-                # 检查D列(索引3)是否有class_id（可以是int或数字字符串）
-                d_val = row[3] if len(row) > 3 else None
-                f_val = row[5] if len(row) > 5 else None
-                # D列可以是int或数字字符串
-                d_is_class_id = False
-                if isinstance(d_val, int):
-                    d_is_class_id = True
-                elif isinstance(d_val, str) and d_val.strip().isdigit():
-                    d_is_class_id = True
-                # F列需要是OBIS格式的字符串
-                f_is_obis = False
-                if f_val and isinstance(f_val, str):
-                    f_str = f_val.strip()
-                    if re.match(r'^\d+-\d+:\d+\.\d+\.\d+\.\d+$', f_str):
-                        f_is_obis = True
-                if d_is_class_id and f_is_obis:
-                    return "sabesp"
+        # 2. 检查是否有 Object model 相关 sheet（大小写不敏感），尝试 SABESP 格式
+        sabesp_sheet = self._find_object_model_sheet(wb)
+        if sabesp_sheet:
+            # 自动检测 SABESP 列布局
+            col_layout = self._detect_sabesp_columns(wb[sabesp_sheet])
+            if col_layout is not None:
+                return "sabesp"
 
         # 3. 检查活动sheet的表头是否符合标准格式
         ws = wb.active
@@ -208,6 +217,66 @@ class DataModelManager:
                 return sheet_name
         return None
 
+    @staticmethod
+    def _detect_sabesp_columns(ws) -> Optional[Dict[str, int]]:
+        """
+        自动检测 SABESP 格式的列布局
+
+        扫描前 20 行，找到同时包含 Class ID（数字）和 OBIS 码（A-B:C.D.E.F格式）的行，
+        确定各列的位置。
+
+        Args:
+            ws: openpyxl Worksheet 对象
+
+        Returns:
+            列布局字典，包含 class_id_col, version_col, obis_col, name_col, attr_id_col, data_type_col 的索引
+            检测失败返回 None
+        """
+        for row in ws.iter_rows(min_row=1, max_row=20, values_only=True):
+            # 查找这一行中的 class_id 和 obis 位置
+            class_id_col = None
+            obis_col = None
+            name_col = 1  # 默认 B 列是名称
+
+            for col_idx, val in enumerate(row):
+                if val is None:
+                    continue
+                # 检测 class_id：int 或数字字符串，且值在 0-100 之间（合理的 class id 范围）
+                if class_id_col is None:
+                    if isinstance(val, int) and 0 < val < 1000:
+                        class_id_col = col_idx
+                    elif isinstance(val, str) and val.strip().isdigit() and 0 < int(val.strip()) < 1000:
+                        class_id_col = col_idx
+
+                # 检测 obis：匹配 A-B:C.D.E.F 格式
+                if obis_col is None and isinstance(val, str):
+                    v = val.strip()
+                    if re.match(r'^\d+-\d+:\d+\.\d+\.\d+\.\d+$', v):
+                        obis_col = col_idx
+
+            # 如果同时找到了 class_id 和 obis，且在不同列
+            if class_id_col is not None and obis_col is not None and class_id_col != obis_col:
+                # version 列通常在 class_id 和 obis 之间
+                version_col = class_id_col + 1
+                if version_col >= obis_col:
+                    version_col = obis_col - 1
+
+                # attr_id 列：默认 A 列（索引0）
+                attr_id_col = 0
+                # data_type 列：通常在名称列和 class_id 列之间
+                data_type_col = 2 if class_id_col >= 3 else class_id_col - 1
+
+                return {
+                    "class_id_col": class_id_col,
+                    "version_col": version_col,
+                    "obis_col": obis_col,
+                    "name_col": name_col,
+                    "attr_id_col": attr_id_col,
+                    "data_type_col": data_type_col,
+                }
+
+        return None
+
     def _load_standard_format(self, wb) -> int:
         """
         加载标准行式格式的Excel
@@ -230,10 +299,8 @@ class DataModelManager:
         col_map = self._map_columns(headers)
 
         if "class_id" not in col_map or "obis" not in col_map:
-            raise ValueError(
-                "Excel文件缺少必要列（class_id/类ID 和 obis/OBIS码）。"
-                f"当前列: {headers}"
-            )
+            # 缺少必要列，返回0个对象，由上层处理
+            return 0
 
         count = 0
         for row in ws.iter_rows(min_row=2, values_only=True):
@@ -266,7 +333,7 @@ class DataModelManager:
             logger = logging.getLogger(__name__)
             logger.warning("dlms-model-parser 解析失败，回退到 SABESP 格式")
             wb = load_workbook(file_path, read_only=True, data_only=True)
-            count = self._load_sabesp_format(wb)
+            count = self._load_sabesp_format(wb, sheet_name)
             wb.close()
             return count
 
@@ -365,25 +432,40 @@ class DataModelManager:
 
         return count
 
-    def _load_sabesp_format(self, wb) -> int:
+    def _load_sabesp_format(self, wb, sheet_name: str = "Object model", col_layout: Optional[Dict] = None) -> int:
         """
         加载SABESP对象分组式格式的Excel
 
         SABESP格式特点:
         - Sheet名: "Object model"
-        - 对象标题行: D列(IC)有数字值的class_id，A列为空，F列有OBIS码
+        - 对象标题行: Class ID列有数字值，A列为空，OBIS列有OBIS码
         - 属性行: A列有数字序号，B列是属性名，C列是数据类型
         - 方法行: A列有数字序号，B列是方法名，C列可能有返回类型
-        - 属性和方法分开编号（都从1开始），方法在属性之后，通过序号重置检测
-        - 属性部分和方法部分之间没有空行，直接通过序号从1重新开始来区分
+        - 列布局自动检测（Class ID可能在D列或E列等）
 
         Args:
             wb: openpyxl Workbook对象
+            sheet_name: sheet 名称
+            col_layout: 列布局（如为None则自动检测）
 
         Returns:
             int: 解析出的对象数量
         """
-        ws = wb["Object model"]
+        ws = wb[sheet_name]
+
+        # 自动检测列布局
+        if col_layout is None:
+            col_layout = self._detect_sabesp_columns(ws)
+        if col_layout is None:
+            # 无法检测列布局，返回0
+            return 0
+
+        class_id_col = col_layout["class_id_col"]
+        version_col = col_layout["version_col"]
+        obis_col = col_layout["obis_col"]
+        name_col = col_layout["name_col"]
+        attr_id_col = col_layout["attr_id_col"]
+        data_type_col = col_layout["data_type_col"]
 
         count = 0
         current_object = None  # 当前对象信息
@@ -394,12 +476,15 @@ class DataModelManager:
 
         for row_idx, row in enumerate(ws.iter_rows(min_row=1, values_only=True), start=1):
             try:
-                a_val = row[0] if len(row) > 0 else None
-                b_val = row[1] if len(row) > 1 else None
-                c_val = row[2] if len(row) > 2 else None
-                d_val = row[3] if len(row) > 3 else None
-                e_val = row[4] if len(row) > 4 else None
-                f_val = row[5] if len(row) > 5 else None
+                def _get(col):
+                    return row[col] if len(row) > col else None
+
+                a_val = _get(attr_id_col)
+                b_val = _get(name_col)
+                c_val = _get(data_type_col)
+                d_val = _get(class_id_col)
+                e_val = _get(version_col)
+                f_val = _get(obis_col)
 
                 # 检测对象标题行
                 is_header = self._is_sabesp_object_header(a_val, d_val, f_val)
