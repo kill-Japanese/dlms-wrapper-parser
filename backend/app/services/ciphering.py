@@ -2,7 +2,14 @@
 加解密层 (Ciphering Layer)
 
 DLMS/COSEM 安全加密使用 AES-GCM 算法
-参考: IEC 62056-53 Clause 7.4.2 (Blue Book) / Green Book
+参考: IEC 62056-53 Clause 7.4 (Blue Book) / Green Book
+
+Security Control 字节定义（按DLMS蓝皮书）:
+  Bit 7 (0x80): C - Compression 压缩标识（1=已压缩，V.44）
+  Bit 6 (0x40): Key_Set 密钥集（0=Unicast/GUEK, 1=Broadcast/GUBK）
+  Bit 5 (0x20): E - Encryption 加密标识（1=已加密）
+  Bit 4 (0x10): A - Authentication 认证标识（1=已认证）
+  Bit 3-0 (0x0F): Security_Suite_Id 安全套件ID（0/1/2）
 
 General-Glo-Ciphering APDU 格式 (BER-encoded):
   Tag (1 byte): 0xDB (General-Glo-Ciphering)
@@ -10,20 +17,12 @@ General-Glo-Ciphering APDU 格式 (BER-encoded):
     length (1 byte): 通常为 0x08
     value (8 bytes): System Title
   ciphered-service (OCTET STRING):
-    length (variable): 加密服务数据长度
+    length (variable)
     value:
       security-control (1 byte): 安全控制字节
-        bit 0 (0x01): EK - 加密标识
-        bit 1 (0x02): AK - 认证标识
-        bit 2 (0x04): 压缩标识（V.44）
-        bit 3-4 (0x18): Key 类型标识
-          00 = GUEK (Global Unicast Encryption Key)
-          01 = GUBK (Global Unicast Broadcast Key)
-          10 = System Key
-        bit 5 (0x20): ECC 签名标识
       invocation-counter (4 bytes, big-endian): 调用计数器
       ciphered-content (variable): 加密的APDU内容
-      GMAC tag (12 bytes): 认证标签（如果有认证）
+      GMAC tag (12 bytes): 认证标签（如果认证开启）
 """
 from typing import Optional, Tuple, Dict
 
@@ -38,17 +37,29 @@ class CipheringError(Exception):
     pass
 
 
-# 密钥ID常量 (Security Control bit 3-4)
-KEY_ID_UNICAST = 0    # 00b - GUEK - Global Unicast Encryption Key（全局单播加密密钥）
-KEY_ID_BROADCAST = 1  # 01b - GUBK - Global Unicast Broadcast Key（全局广播密钥）
-KEY_ID_SYSTEM = 2     # 10b - System Key（系统密钥）
+# ============================================================
+# Security Control 字节位定义（按DLMS蓝皮书）
+# ============================================================
+# Bit 7 (0x80): C - Compression (压缩标识)
+# Bit 6 (0x40): Key_Set (密钥集: 0=Unicast, 1=Broadcast)
+# Bit 5 (0x20): E - Encryption (加密标识)
+# Bit 4 (0x10): A - Authentication (认证标识)
+# Bit 3-0 (0x0F): Security_Suite_Id (安全套件ID: 0/1/2)
+# ============================================================
+SC_MASK_COMPRESSED = 0x80       # bit 7 - C (Compression)
+SC_MASK_KEY_SET = 0x40          # bit 6 - Key_Set (0=Unicast, 1=Broadcast)
+SC_MASK_ENCRYPTED = 0x20        # bit 5 - E (Encryption)
+SC_MASK_AUTHENTICATED = 0x10    # bit 4 - A (Authentication)
+SC_MASK_SUITE_ID = 0x0F         # bit 3-0 - Security_Suite_Id
 
-# SC字节位掩码常量
-SC_MASK_ENCRYPTED = 0x01     # bit 0 - EK (Encryption Key used)
-SC_MASK_AUTHENTICATED = 0x02  # bit 1 - AK (Authentication Key used)
-SC_MASK_COMPRESSED = 0x04     # bit 2 - Compressed (V.44)
-SC_MASK_KEY_ID = 0x18         # bit 3-4 - Key Identifier (0x08 | 0x10)
-SC_MASK_ECC_SIGNED = 0x20     # bit 5 - ECC signature present
+# 密钥集常量
+KEY_SET_UNICAST = 0     # 0 = Unicast (GUEK)
+KEY_SET_BROADCAST = 1   # 1 = Broadcast (GUBK)
+
+# 安全套件常量
+SUITE_0 = 0  # Suite 0 (预留)
+SUITE_1 = 1  # Suite 1 (AES-128-GCM)
+SUITE_2 = 2  # Suite 2 (ECC + AES-256-GCM)
 
 
 def _parse_ber_length(data: bytes, offset: int) -> Tuple[int, int]:
@@ -83,29 +94,21 @@ def _parse_ber_length(data: bytes, offset: int) -> Tuple[int, int]:
         return first, offset
 
 
-def select_key_by_id(key_id: int, keys: Dict[str, Optional[bytes]]) -> Optional[bytes]:
+def select_key_by_key_set(key_set: int, keys: Dict[str, Optional[bytes]]) -> Optional[bytes]:
     """
-    根据 key_id 选择对应的密钥
+    根据 Key_Set 选择对应的加密密钥
 
     Args:
-        key_id: 密钥标识 (0=unicast, 1=broadcast, 2=system)
+        key_set: 密钥集 (0=Unicast/GUEK, 1=Broadcast/GUBK)
         keys: 密钥字典，包含 guek, gubk, ak, kek 等
 
     Returns:
         选中的密钥字节，或 None
-
-    密钥映射:
-        key_id=0 (unicast)   -> GUEK
-        key_id=1 (broadcast) -> GUBK
-        key_id=2 (system)    -> 系统密钥（暂用GUEK）
     """
-    if key_id == KEY_ID_UNICAST:
+    if key_set == KEY_SET_UNICAST:
         return keys.get("guek")
-    elif key_id == KEY_ID_BROADCAST:
+    elif key_set == KEY_SET_BROADCAST:
         return keys.get("gubk")
-    elif key_id == KEY_ID_SYSTEM:
-        # 系统密钥暂用GUEK
-        return keys.get("guek")
     else:
         # 默认使用GUEK
         return keys.get("guek")
@@ -115,13 +118,12 @@ def _parse_security_control(sc_byte: int) -> CipherInfo:
     """
     解析安全控制字节 (Security Control byte)
 
-    SC字节位定义:
-    - bit 0 (0x01): EK - 加密标识
-    - bit 1 (0x02): AK - 认证标识
-    - bit 2 (0x04): 压缩标识 (V.44)
-    - bit 3-4 (0x18): Key 类型标识 (0=unicast, 1=broadcast, 2=system)
-    - bit 5 (0x20): ECC 签名标识
-    - bit 6-7: 保留
+    按DLMS蓝皮书定义:
+    - Bit 7 (0x80): C - Compression 压缩标识
+    - Bit 6 (0x40): Key_Set 密钥集 (0=Unicast, 1=Broadcast)
+    - Bit 5 (0x20): E - Encryption 加密标识
+    - Bit 4 (0x10): A - Authentication 认证标识
+    - Bit 3-0 (0x0F): Security_Suite_Id 安全套件ID
 
     Args:
         sc_byte: 安全控制字节值 (0x00 - 0xFF)
@@ -129,18 +131,26 @@ def _parse_security_control(sc_byte: int) -> CipherInfo:
     Returns:
         CipherInfo: 加密信息对象
     """
+    compressed = bool(sc_byte & SC_MASK_COMPRESSED)
+    key_set = (sc_byte & SC_MASK_KEY_SET) >> 6  # bit 6
     encrypted = bool(sc_byte & SC_MASK_ENCRYPTED)
     authenticated = bool(sc_byte & SC_MASK_AUTHENTICATED)
-    compressed = bool(sc_byte & SC_MASK_COMPRESSED)
-    key_id = (sc_byte & SC_MASK_KEY_ID) >> 3  # bit 3-4
-    ecc_signed = bool(sc_byte & SC_MASK_ECC_SIGNED)
+    suite_id = sc_byte & SC_MASK_SUITE_ID  # bit 3-0
+
+    print(f"[CIPHER DEBUG] SC byte = 0x{sc_byte:02X} ({sc_byte})")
+    print(f"  Bit 7 (C/Compression):  {(sc_byte >> 7) & 1} -> {'压缩' if compressed else '未压缩'}")
+    print(f"  Bit 6 (Key_Set):        {(sc_byte >> 6) & 1} -> {'广播(GUBK)' if key_set else '单播(GUEK)'}")
+    print(f"  Bit 5 (E/Encryption):   {(sc_byte >> 5) & 1} -> {'加密' if encrypted else '未加密'}")
+    print(f"  Bit 4 (A/Authentication): {(sc_byte >> 4) & 1} -> {'认证' if authenticated else '未认证'}")
+    print(f"  Bit 3-0 (Suite ID):     {suite_id} -> Suite {suite_id}")
 
     return CipherInfo(
         encrypted=encrypted,
         authenticated=authenticated,
         compressed=compressed,
-        key_id=key_id,
-        ecc_signed=ecc_signed,
+        key_id=key_set,  # 用 key_id 字段存储 key_set
+        ecc_signed=False,  # 旧字段保留，实际ECC信息在suite_id中
+        suite_id=suite_id,
     )
 
 
@@ -155,15 +165,17 @@ def _build_security_control(cipher_info: CipherInfo) -> int:
         int: 安全控制字节值 (0x00 - 0xFF)
     """
     sc = 0
+    if cipher_info.compressed:
+        sc |= SC_MASK_COMPRESSED
+    if cipher_info.key_id == KEY_SET_BROADCAST:
+        sc |= SC_MASK_KEY_SET
     if cipher_info.encrypted:
         sc |= SC_MASK_ENCRYPTED
     if cipher_info.authenticated:
         sc |= SC_MASK_AUTHENTICATED
-    if cipher_info.compressed:
-        sc |= SC_MASK_COMPRESSED
-    sc |= (cipher_info.key_id & 0x03) << 3
-    if cipher_info.ecc_signed:
-        sc |= SC_MASK_ECC_SIGNED
+    # Suite ID
+    suite_id = getattr(cipher_info, 'suite_id', SUITE_1)
+    sc |= (suite_id & 0x0F)
     return sc
 
 
@@ -184,6 +196,63 @@ def _derive_gcm_key(key: bytes) -> bytes:
     else:
         # 不足时用0填充
         return key + b'\x00' * (16 - len(key))
+
+
+def _compute_nonce(system_title: bytes, invocation_counter: int, ic_length: int = 4) -> bytes:
+    """
+    计算 AES-GCM Nonce (IV)
+
+    按 DLMS 规范:
+    Nonce = System Title + Invocation Counter = 12 字节
+
+    - System Title: 8字节（从帧中提取，跳过BER长度字节后的值）
+    - Invocation Counter: 4字节，大端序
+
+    Args:
+        system_title: System Title (8字节)
+        invocation_counter: 调用计数器
+        ic_length: IC字节长度（默认4字节）
+
+    Returns:
+        12字节 Nonce
+    """
+    ic_bytes = invocation_counter.to_bytes(ic_length, "big")
+    nonce = system_title + ic_bytes
+    nonce = nonce[:12]  # 确保总共12字节
+
+    print(f"[CIPHER DEBUG] Nonce (IV) 计算:")
+    print(f"  System Title:    {bytes_to_hex(system_title)} ({len(system_title)} bytes)")
+    print(f"  Invocation Ctr:  {invocation_counter} (0x{invocation_counter:08X})")
+    print(f"  IC bytes:        {bytes_to_hex(ic_bytes)} ({len(ic_bytes)} bytes)")
+    print(f"  Nonce (12B):     {bytes_to_hex(nonce)} ({len(nonce)} bytes)")
+
+    return nonce
+
+
+def _compute_aad(sc_byte: int, system_title: bytes = None) -> bytes:
+    """
+    计算 AES-GCM AAD (Additional Authenticated Data, 关联认证数据)
+
+    按 DLMS 规范，AAD 至少包含 Security Control 字节。
+    部分实现可能还包含 System Title 等其他数据。
+
+    注意：不同厂商/设备可能有不同的AAD构造方式。
+    如果解密失败，可以尝试调整AAD的构造。
+
+    Args:
+        sc_byte: Security Control 字节
+        system_title: System Title（可选，部分设备需要）
+
+    Returns:
+        AAD 字节
+    """
+    # 基本AAD = SC 字节
+    aad = bytes([sc_byte])
+
+    print(f"[CIPHER DEBUG] AAD (关联认证数据) 计算:")
+    print(f"  AAD = SC byte:    {bytes_to_hex(aad)} ({len(aad)} bytes)")
+
+    return aad
 
 
 def parse_ciphered(
@@ -211,7 +280,7 @@ def parse_ciphered(
         data: 加密APDU数据（从tag字节开始，如0xDB）
         key: 解密密钥（16字节AES-128密钥，向后兼容参数）
         keys: 密钥字典，包含 guek, gubk, ak, kek 等
-              当提供 keys 时，会根据 key_id 自动选择密钥
+              当提供 keys 时，会根据 key_set 自动选择密钥
 
     Returns:
         (plaintext_apdu, CipherFrame): 解密后的APDU数据和加密帧信息
@@ -219,44 +288,59 @@ def parse_ciphered(
     Raises:
         CipheringError: 解析或解密失败
     """
+    print(f"\n{'='*60}")
+    print(f"[CIPHER DEBUG] ===== 开始解析加密帧 =====")
+    print(f"{'='*60}")
+    print(f"[CIPHER DEBUG] 输入数据长度: {len(data)} bytes")
+    print(f"[CIPHER DEBUG] 输入数据前32字节: {bytes_to_hex(data[:32])}")
+
     if len(data) < 2:
         raise CipheringError("加密帧数据太短")
 
     offset = 0
 
-    # 1. APDU Tag (0xDB = General-Glo-Ciphering, 0xDA = General-Ciphering)
+    # 1. APDU Tag
     tag = data[offset]
     offset += 1
+    print(f"[CIPHER DEBUG] APDU Tag: 0x{tag:02X} ({tag})")
 
     if tag not in (0xDA, 0xDB, 0xDC, 0xD8):
         raise CipheringError(f"不是加密APDU，tag={tag:#04x}")
 
     # 2. System Title (OCTET STRING, BER编码)
-    #    第一个字节是长度（通常是0x08），后面才是真正的System Title
+    print(f"\n[CIPHER DEBUG] --- 解析 System Title ---")
     try:
         st_length, offset = _parse_ber_length(data, offset)
+        print(f"[CIPHER DEBUG] ST BER length: {st_length} (0x{st_length:02X})")
         if st_length == 0 or offset + st_length > len(data):
             raise CipheringError("System Title 长度无效")
         system_title = data[offset:offset + st_length]
         offset += st_length
+        print(f"[CIPHER DEBUG] System Title value: {bytes_to_hex(system_title)} ({len(system_title)} bytes)")
     except CipheringError:
         raise
     except Exception as e:
         raise CipheringError(f"解析System Title失败: {e}")
 
     # 3. Ciphered Service Data (OCTET STRING, BER编码)
+    print(f"\n[CIPHER DEBUG] --- 解析 Ciphered Service ---")
     try:
         cs_length, offset = _parse_ber_length(data, offset)
+        print(f"[CIPHER DEBUG] CS BER length: {cs_length} (0x{cs_length:02X})")
         if cs_length == 0 or offset + cs_length > len(data):
-            raise CipheringError("加密服务数据长度无效")
+            raise CipheringError(f"加密服务数据长度无效: {cs_length}")
         ciphered_service = data[offset:offset + cs_length]
+        print(f"[CIPHER DEBUG] Ciphered Service 内容 ({len(ciphered_service)} bytes):")
+        print(f"  前16字节: {bytes_to_hex(ciphered_service[:16])}")
+        if len(ciphered_service) > 16:
+            print(f"  后12字节: {bytes_to_hex(ciphered_service[-12:])}")
     except CipheringError:
         raise
     except Exception as e:
         raise CipheringError(f"解析加密服务数据失败: {e}")
 
     # 4. 解析 ciphered-service 内部结构
-    #    结构: security-control(1) + invocation-counter(4) + ciphered-content + GMAC(12 if auth)
+    print(f"\n[CIPHER DEBUG] --- 解析 Ciphered Service 内部字段 ---")
     cs_offset = 0
 
     # 4.1 Security Control 字节
@@ -267,71 +351,96 @@ def parse_ciphered(
     cipher_info = _parse_security_control(sc_byte)
 
     # 4.2 Invocation Counter (4字节，大端序)
-    #    注意：DLMS规范中IC的长度通常是4字节
-    ic_length = 4  # DLMS标准中Invocation Counter为4字节
+    ic_length = 4  # Suite 1 固定4字节
     if cs_offset + ic_length > len(ciphered_service):
         raise CipheringError("数据不足，无法读取调用计数器")
     invocation_counter = int.from_bytes(
         ciphered_service[cs_offset:cs_offset + ic_length], "big"
     )
     cs_offset += ic_length
+    print(f"\n[CIPHER DEBUG] Invocation Counter: {invocation_counter} (0x{invocation_counter:08X})")
 
     # 4.3 密文数据 + GMAC Tag
     remaining = ciphered_service[cs_offset:]
     gmac_tag = b""
     ciphered_data = remaining
 
-    # 如果有认证，最后12字节是GMAC tag
     if cipher_info.authenticated and len(remaining) > 12:
         gmac_tag = remaining[-12:]
         ciphered_data = remaining[:-12]
+        print(f"[CIPHER DEBUG] 密文数据: {len(ciphered_data)} bytes")
+        print(f"  前8字节: {bytes_to_hex(ciphered_data[:8])}")
+        print(f"[CIPHER DEBUG] GMAC Tag: {bytes_to_hex(gmac_tag)} (12 bytes)")
+    else:
+        print(f"[CIPHER DEBUG] 密文数据: {len(ciphered_data)} bytes (未认证)")
+        print(f"  前8字节: {bytes_to_hex(ciphered_data[:8]) if len(ciphered_data) >= 8 else bytes_to_hex(ciphered_data)}")
 
     # 5. 选择解密密钥
+    print(f"\n[CIPHER DEBUG] --- 选择密钥 ---")
     active_key = key
-    active_key_name = "default"
+    active_key_name = "default (param key)"
     if keys is not None:
-        selected_key = select_key_by_id(cipher_info.key_id, keys)
+        selected_key = select_key_by_key_set(cipher_info.key_id, keys)
         if selected_key is not None:
             active_key = selected_key
-            key_id_names = {0: "GUEK (unicast)", 1: "GUBK (broadcast)", 2: "System Key"}
-            active_key_name = key_id_names.get(cipher_info.key_id, f"key_id={cipher_info.key_id}")
+            key_set_names = {0: "GUEK (Unicast)", 1: "GUBK (Broadcast)"}
+            active_key_name = key_set_names.get(cipher_info.key_id, f"key_set={cipher_info.key_id}")
+    print(f"[CIPHER DEBUG] 使用密钥: {active_key_name}")
+    if active_key is not None:
+        print(f"[CIPHER DEBUG] 密钥值: {bytes_to_hex(active_key)}")
+    else:
+        print(f"[CIPHER DEBUG] 密钥值: None (未提供密钥)")
 
-    # 6. 尝试解密
+    # 6. 计算 Nonce 和 AAD
+    print(f"\n[CIPHER DEBUG] --- 计算 AES-GCM 参数 ---")
+    nonce = _compute_nonce(system_title, invocation_counter, ic_length)
+    aad = _compute_aad(sc_byte, system_title)
+
+    # 7. 尝试解密
+    print(f"\n[CIPHER DEBUG] --- 开始解密 ---")
     decrypt_success = False
     plaintext = b""
 
     if cipher_info.encrypted and active_key is not None:
         try:
             gcm_key = _derive_gcm_key(active_key)
+            print(f"[CIPHER DEBUG] AES-GCM 密钥 (16B): {bytes_to_hex(gcm_key)}")
+
             aesgcm = AESGCM(gcm_key)
 
-            # 构建 Nonce (IV): System Title (8字节) + Invocation Counter (4字节) = 12字节
-            # System Title 已经跳过了长度字节，直接是8字节的值
-            nonce = system_title + invocation_counter.to_bytes(4, "big")
-            nonce = nonce[:12]  # 确保总共12字节
-
-            # 关联数据 (AAD): Security Control 字节
-            # 注意：部分设备的AAD可能包含更多数据，这里先用最基本的SC字节
-            aad = bytes([sc_byte])
-
-            # 解密
             if cipher_info.authenticated:
                 # 带认证标签：密文 + 12字节GMAC tag
                 ciphertext_with_tag = ciphered_data + gmac_tag
+                print(f"[CIPHER DEBUG] 密文+Tag长度: {len(ciphertext_with_tag)} bytes")
+                print(f"[CIPHER DEBUG] 调用 AESGCM.decrypt(nonce, ciphertext+tag, aad)")
                 plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, aad)
             else:
                 # 仅加密（DLMS中通常同时加密和认证）
+                print(f"[CIPHER DEBUG] 密文长度: {len(ciphered_data)} bytes (未认证)")
+                print(f"[CIPHER DEBUG] 调用 AESGCM.decrypt(nonce, ciphertext, aad)")
                 plaintext = aesgcm.decrypt(nonce, ciphered_data, aad)
 
             decrypt_success = True
+            print(f"[CIPHER DEBUG] ✅ 解密成功!")
+            print(f"[CIPHER DEBUG] 明文长度: {len(plaintext)} bytes")
+            print(f"[CIPHER DEBUG] 明文前16字节: {bytes_to_hex(plaintext[:16])}")
         except Exception as e:
-            # 解密失败，保留原始密文
             decrypt_success = False
             plaintext = b""
+            print(f"[CIPHER DEBUG] ❌ 解密失败: {e}")
+            print(f"[CIPHER DEBUG] 可能的原因:")
+            print(f"  1. 密钥不正确")
+            print(f"  2. Nonce/IV 计算错误")
+            print(f"  3. AAD 构造错误")
+            print(f"  4. GMAC Tag 长度或位置不对")
+            print(f"  5. 密文数据不完整")
     elif not cipher_info.encrypted:
         # 未加密，直接返回
         plaintext = ciphered_data
         decrypt_success = True
+        print(f"[CIPHER DEBUG] 未加密，直接返回明文")
+    else:
+        print(f"[CIPHER DEBUG] 未提供密钥，无法解密")
 
     # 构建返回对象
     cipher_frame = CipherFrame(
@@ -346,6 +455,12 @@ def parse_ciphered(
         extracted_from_frame=True,
     )
 
+    print(f"\n{'='*60}")
+    print(f"[CIPHER DEBUG] ===== 解析完成 =====")
+    print(f"  解密成功: {decrypt_success}")
+    print(f"  明文长度: {len(plaintext)} bytes")
+    print(f"{'='*60}\n")
+
     return plaintext, cipher_frame
 
 
@@ -359,6 +474,7 @@ def build_ciphered(
     compressed: bool = False,
     key_id: int = 0,
     keys: Optional[Dict[str, Optional[bytes]]] = None,
+    suite_id: int = SUITE_1,
 ) -> bytes:
     """
     构建 General-Glo-Ciphering 加密帧（BER编码格式）
@@ -384,9 +500,9 @@ def build_ciphered(
         encrypted: 是否加密
         authenticated: 是否认证
         compressed: 是否压缩
-        key_id: 密钥标识 (0-3)
-        keys: 密钥字典，包含 guek, gubk, ak, kek 等
-              当提供 keys 时，会根据 key_id 自动选择密钥
+        key_id: 密钥集 (0=Unicast/GUEK, 1=Broadcast/GUBK)
+        keys: 密钥字典
+        suite_id: 安全套件ID (默认Suite 1)
 
     Returns:
         bytes: 完整的加密APDU数据（从0xDB tag开始）
@@ -397,7 +513,7 @@ def build_ciphered(
     # 选择加密密钥
     active_key = key
     if keys is not None:
-        selected_key = select_key_by_id(key_id, keys)
+        selected_key = select_key_by_key_set(key_id, keys)
         if selected_key is not None:
             active_key = selected_key
 
@@ -406,6 +522,7 @@ def build_ciphered(
         authenticated=authenticated,
         compressed=compressed,
         key_id=key_id,
+        suite_id=suite_id,
     )
 
     sc_byte = _build_security_control(cipher_info)

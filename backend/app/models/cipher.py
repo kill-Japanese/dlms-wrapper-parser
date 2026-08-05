@@ -9,22 +9,19 @@ class CipherInfo(BaseModel):
     """加密信息模型
 
     Security Control (SC) 字节位定义 (参考 DLMS 蓝皮书/IEC 62056-53):
-    - bit 0 (0x01): EK - Encryption Key 使用标识（1=已加密）
-    - bit 1 (0x02): AK - Authentication Key 使用标识（1=已认证）
-    - bit 2 (0x04): 压缩标识（1=已压缩，V.44）
-    - bit 3-4 (0x08, 0x10): Key 类型标识
-      - 00 (0x00) = Unicast / GUEK (Global Unicast Encryption Key)
-      - 01 (0x08) = Broadcast / GUBK (Global Unicast Broadcast Key)
-      - 10 (0x10) = System Key
-    - bit 5 (0x20): ECC 签名标识（1=有ECC签名）
-    - bit 6-7: 保留
+    - Bit 7 (0x80): C - Compression 压缩标识
+    - Bit 6 (0x40): Key_Set 密钥集 (0=Unicast/GUEK, 1=Broadcast/GUBK)
+    - Bit 5 (0x20): E - Encryption 加密标识
+    - Bit 4 (0x10): A - Authentication 认证标识
+    - Bit 3-0 (0x0F): Security_Suite_Id 安全套件ID (0/1/2)
     """
 
-    encrypted: bool = Field(default=False, description="是否加密 (bit 0, EK)")
-    authenticated: bool = Field(default=False, description="是否认证 (bit 1, AK)")
-    compressed: bool = Field(default=False, description="是否压缩 (bit 2, V.44)")
-    key_id: int = Field(default=0, description="密钥标识 (bit 3-4): 0=Unicast/GUEK, 1=Broadcast/GUBK, 2=System")
-    ecc_signed: bool = Field(default=False, description="是否有ECC签名 (bit 5)")
+    encrypted: bool = Field(default=False, description="是否加密 (Bit 5, E)")
+    authenticated: bool = Field(default=False, description="是否认证 (Bit 4, A)")
+    compressed: bool = Field(default=False, description="是否压缩 (Bit 7, C)")
+    key_id: int = Field(default=0, description="密钥集 (Bit 6): 0=Unicast/GUEK, 1=Broadcast/GUBK")
+    ecc_signed: bool = Field(default=False, description="是否有ECC签名 (兼容旧字段)")
+    suite_id: int = Field(default=1, description="安全套件ID (Bit 3-0): 0/1/2")
 
 
 class CipherFrame(BaseModel):
@@ -43,20 +40,20 @@ class CipherFrame(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "security_control": "20",
-                "security_control_byte": 32,
-                "system_title": "000000000000",
+                "security_control": "31",
+                "security_control_byte": 49,
+                "system_title": "4953453131303733",
                 "invocation_counter": 1,
                 "ciphered_data_hex": "abcd1234...",
-                "gmac_tag": "deadbeef",
+                "gmac_tag": "deadbeef...",
                 "decrypt_success": True,
                 "extracted_from_frame": True,
                 "cipher_info": {
                     "encrypted": True,
-                    "authenticated": False,
+                    "authenticated": True,
                     "compressed": False,
                     "key_id": 0,
-                    "ecc_signed": False,
+                    "suite_id": 1,
                 },
             }
         }
