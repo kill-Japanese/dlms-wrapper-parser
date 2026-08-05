@@ -5,7 +5,7 @@ import asyncio
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
@@ -120,7 +120,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
-    """全局异常处理器"""
+    """全局异常处理器 - 仅处理未被捕获的异常，HTTPException由FastAPI默认处理"""
+    # HTTPException 由 FastAPI 默认处理，这里跳过
+    if isinstance(exc, HTTPException):
+        from fastapi.exception_handlers import http_exception_handler
+        return await http_exception_handler(request, exc)
+
     return JSONResponse(
         status_code=500,
         content={
