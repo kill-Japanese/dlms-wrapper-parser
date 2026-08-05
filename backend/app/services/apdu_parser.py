@@ -36,6 +36,13 @@ from app.models.apdu import (
 from app.utils.hex_utils import bytes_to_hex, hex_to_bytes
 from app.utils.obis_utils import obis_bytes_to_str, obis_str_to_bytes
 from app.utils.ber_encoder import decode_data, encode_data, DATA_TYPES
+from app.utils.compact_ber import decode_compact_data
+from app.utils.push_setup_versions import (
+    parse_push_object_list,
+    auto_detect_version_from_notification_body,
+    get_version_info,
+    PushObjectDefinition,
+)
 
 
 class APDUParser:
@@ -157,66 +164,69 @@ class APDUParser:
         invoke_id, offset = cls._parse_uint32(data, offset)
 
         # 检查可选的date-time字段
-        # date-time 在DataNotification中是 [0] IMPLICIT Date-Time OPTIONAL
-        # 支持多种格式：
-        # 1. 标准BER date-time (tag=0x19)
-        # 2. context tag [0] constructed (0xA0) IMPLICIT Date-Time
-        # 3. context tag [0] primitive (0x80) - octet-string 方式
-        # 4. null-data (0x00) - date-time 为 null
-        # 5. dont-care (0xFF) - date-time 不存在
+        # date-time 在DataNotification中是 [0] IMPLICIT Date-Time
+        # 但实际实现中，有些表直接使用 date-time tag (0x19)
+        # 也有些使用 context tag 0x80
         datetime_dict = None
         datetime_raw = None
-        parse_warnings = []
 
         if offset < len(data):
             next_byte = data[offset]
+            # 尝试解析date-time
+            # 方式1: 标准BER date-time (tag=0x19)
+            # 方式2: context tag [0] = 0x80 (构造形式 0xA0)
+            # 方式3: null-data (0x00) 表示 date-time 为 null/不存在
             try:
-                if next_byte == 0x19:  # date-time tag
+                if next_byte == 0x00:  # null-data，表示 date-time 为 null
+                    datetime_dict = None
+                    datetime_raw = "00"
+                    offset += 1  # 跳过 null tag
+                elif next_byte == 0x19:  # date-time tag
                     dt_value, new_offset, _ = decode_data(data, offset)
                     datetime_dict = dt_value
                     datetime_raw = bytes_to_hex(data[offset:new_offset])
                     offset = new_offset
-                elif next_byte == 0xA0:  # context tag [0] constructed
+                elif next_byte == 0xA0:  # context tag [0] constructed, IMPLICIT Date-Time
+                    # 跳过context tag，直接解析date-time内容
+                    dt_length, dt_offset = cls._parse_variable_length(data, offset + 1)
+                    # 内容是date-time内容（不带tag）
+                    from app.utils.ber_encoder import _decode_date_time
+                    dt_bytes = data[dt_offset:dt_offset + dt_length]
+                    datetime_dict = _decode_date_time(dt_bytes, dt_length)
+                    datetime_raw = bytes_to_hex(data[offset:dt_offset + dt_length])
+                    offset = dt_offset + dt_length
+                elif next_byte == 0x80:  # context tag [0] primitive (不太常见)
                     dt_length, dt_offset = cls._parse_variable_length(data, offset + 1)
                     from app.utils.ber_encoder import _decode_date_time
                     dt_bytes = data[dt_offset:dt_offset + dt_length]
                     datetime_dict = _decode_date_time(dt_bytes, dt_length)
                     datetime_raw = bytes_to_hex(data[offset:dt_offset + dt_length])
                     offset = dt_offset + dt_length
-                elif next_byte == 0x80:  # context tag [0] primitive (octet-string方式)
-                    dt_length, dt_offset = cls._parse_variable_length(data, offset + 1)
-                    from app.utils.ber_encoder import _decode_date_time
-                    dt_bytes = data[dt_offset:dt_offset + dt_length]
-                    datetime_dict = _decode_date_time(dt_bytes, dt_length)
-                    datetime_raw = bytes_to_hex(data[offset:dt_offset + dt_length])
-                    offset = dt_offset + dt_length
-                elif next_byte == 0x00:  # null-data - date-time 为 null
-                    datetime_dict = None
-                    datetime_raw = "00"
-                    offset += 1
-                    parse_warnings.append("date-time is null (0x00)")
-                elif next_byte == 0xFF:  # dont-care - date-time 不存在
-                    datetime_dict = None
-                    datetime_raw = "FF"
-                    offset += 1
-                    parse_warnings.append("date-time is dont-care (0xFF)")
-            except Exception as e:
-                parse_warnings.append(f"date-time parse error: {str(e)}")
+            except Exception:
+                # 解析失败，当作没有datetime
+                pass
 
         # 记录notification-body的起始位置
         body_start = offset
         notification_body_hex = bytes_to_hex(data[offset:]) if offset < len(data) else ""
 
         # 解析notification-body (array of structure)
-        items: List[CosemDataItem] = []
+        body_result = {
+            "items": [],
+            "push_setup_version": 0,
+            "push_setup_version_name": "v0",
+            "has_class40_template": False,
+            "push_object_list": [],
+        }
 
         if offset < len(data):
             try:
-                items = cls._parse_notification_body(data, offset)
-                # 计算body实际占用的字节（所有item的raw data）
+                body_result = cls._parse_notification_body(data, offset)
             except Exception as e:
-                # 解析失败，保留空items
+                # 解析失败，保留空结果
                 pass
+
+        items = body_result.get("items", [])
 
         return DataNotificationAPDU(
             tag=tag,
@@ -228,371 +238,287 @@ class APDUParser:
             item_count=len(items),
             notification_body_hex=notification_body_hex,
             raw_hex=bytes_to_hex(data),
-            parse_warnings=parse_warnings if 'parse_warnings' in dir() else [],
+            push_setup_version=body_result.get("push_setup_version", 0),
+            push_setup_version_name=body_result.get("push_setup_version_name", "v0"),
+            push_object_list=body_result.get("push_object_list", []),
+            has_class40_template=body_result.get("has_class40_template", False),
         )
 
     @classmethod
-    def _parse_notification_body(cls, data: bytes, offset: int) -> List[CosemDataItem]:
+    def _parse_notification_body(cls, data: bytes, offset: int) -> dict:
         """
-        解析notification-body（多策略尝试）
-
-        支持多种格式：
-        1. 标准BER编码: array of structure { ber-descriptor, value }
-        2. 外层structure + 内层array + 裸9字节描述符
-        3. 扁平结构: 直接序列的 描述符+值
-        4. OBIS搜索模式: 搜索所有 octet-string(6字节) 作为OBIS
-
-        Args:
-            data: 完整数据
-            offset: notification-body 起始位置
+        解析notification-body（支持紧凑编码和标准BER两种格式）
 
         Returns:
-            List[CosemDataItem]: 解析出的数据项列表
+            dict: 包含 items, push_setup_version, has_class40_template, push_object_list 等信息
         """
+        default_result = {
+            "items": [],
+            "push_setup_version": 0,
+            "push_setup_version_name": "v0",
+            "has_class40_template": False,
+            "push_object_list": [],
+        }
+
+        # 先尝试紧凑编码解析
+        try:
+            compact_result = cls._parse_notification_body_compact(data, offset)
+            if compact_result and compact_result.get("items"):
+                return compact_result
+        except Exception:
+            pass
+
+        # 紧凑编码失败，尝试标准BER解析
+        try:
+            std_items = cls._parse_notification_body_standard(data, offset)
+            if std_items:
+                default_result["items"] = std_items
+                return default_result
+        except Exception:
+            pass
+
+        return default_result
+
+    @classmethod
+    def _parse_notification_body_compact(cls, data: bytes, offset: int) -> dict:
+        """
+        使用紧凑编码解析 notification-body
+
+        支持两种格式：
+        1. Class 40 模版格式：第一个描述符是 class40 attr2，作为模版
+           - 描述符列表在第一个 array 中
+           - 值在外层 structure 的后续元素中
+           - Push object list 定义了推送数据的格式
+
+        2. 普通格式：描述符和值一一对应
+
+        Returns:
+            dict: 解析结果，包含 items, push_setup_version 等
+        """
+        result = {
+            "items": [],
+            "push_setup_version": 0,
+            "push_setup_version_name": "v0",
+            "has_class40_template": False,
+            "push_object_list": [],
+        }
+
+        # 外层应该是 structure
+        if data[offset] != 0x02:
+            return result
+
+        # 使用宽容模式解析，因为可能数据不完整
+        struct_value, struct_end, struct_type = decode_compact_data(data, offset, lenient=True)
+        if not isinstance(struct_value, list) or len(struct_value) < 1:
+            return result
+
+        # 第一个元素应该是 array（描述符列表）
+        first_elem = struct_value[0]
+        if not isinstance(first_elem, list):
+            return result
+
+        # 解析 Push object list（描述符列表）
+        push_objects, detected_version = parse_push_object_list(first_elem)
+
+        if not push_objects:
+            return result
+
+        # 检测是否包含 Class 40 模版（第一个描述符是 class40 attr2）
+        has_class40 = (
+            len(push_objects) > 0
+            and push_objects[0].class_id == 40
+            and push_objects[0].attribute_id == 2
+        )
+
+        version_info = get_version_info(detected_version)
+        result["push_setup_version"] = detected_version
+        result["push_setup_version_name"] = version_info.version_name
+        result["has_class40_template"] = has_class40
+
+        # 构造 push_object_list 用于前端展示
+        result["push_object_list"] = [
+            {
+                "class_id": obj.class_id,
+                "obis": obj.obis,
+                "attribute_id": obj.attribute_id,
+                "data_index": obj.data_index,
+                "access_selector": obj.access_selector,
+            }
+            for obj in push_objects
+        ]
+
+        # 收集所有值
+        # 值的来源：外层 structure 中第一个元素（array）之后的所有元素
+        values = struct_value[1:] if len(struct_value) > 1 else []
+
+        # 构造数据项列表
         items: List[CosemDataItem] = []
 
-        if offset >= len(data):
+        if has_class40:
+            # Class 40 模版模式：
+            # 第一个描述符（class40 attr2）是模版，没有对应的值
+            # 后续描述符（1..N）与值（0..M）按顺序配对
+            data_descriptors = push_objects[1:]  # 跳过第一个（class40 模版）
+
+            # 配对描述符和值
+            num_pairs = min(len(data_descriptors), len(values))
+            for i in range(num_pairs):
+                desc = data_descriptors[i]
+                val = values[i]
+                val_type = cls._infer_data_type(val)
+                items.append(CosemDataItem(
+                    class_id=desc.class_id,
+                    obis=desc.obis,
+                    obis_bytes=desc.obis_bytes,
+                    attribute_id=desc.attribute_id,
+                    data_type=val_type,
+                    value=cls._format_value_for_display(val, val_type),
+                    raw_hex="",
+                ))
+
+            # 如果还有剩余的描述符（值不够），用 null 填充
+            for i in range(num_pairs, len(data_descriptors)):
+                desc = data_descriptors[i]
+                items.append(CosemDataItem(
+                    class_id=desc.class_id,
+                    obis=desc.obis,
+                    obis_bytes=desc.obis_bytes,
+                    attribute_id=desc.attribute_id,
+                    data_type="null-data",
+                    value=None,
+                    raw_hex="",
+                ))
+
+            # 如果还有剩余的值，作为额外项添加
+            for i in range(num_pairs, len(values)):
+                val = values[i]
+                val_type = cls._infer_data_type(val)
+                items.append(CosemDataItem(
+                    class_id=0,
+                    obis="",
+                    obis_bytes=b"",
+                    attribute_id=0,
+                    data_type=val_type,
+                    value=cls._format_value_for_display(val, val_type),
+                    raw_hex="",
+                ))
+        else:
+            # 普通模式：描述符与值一一配对
+            num_pairs = min(len(push_objects), len(values))
+            for i in range(num_pairs):
+                desc = push_objects[i]
+                val = values[i]
+                val_type = cls._infer_data_type(val)
+                items.append(CosemDataItem(
+                    class_id=desc.class_id,
+                    obis=desc.obis,
+                    obis_bytes=desc.obis_bytes,
+                    attribute_id=desc.attribute_id,
+                    data_type=val_type,
+                    value=cls._format_value_for_display(val, val_type),
+                    raw_hex="",
+                ))
+
+            # 如果值不够，剩余描述符用 null 填充
+            for i in range(num_pairs, len(push_objects)):
+                desc = push_objects[i]
+                items.append(CosemDataItem(
+                    class_id=desc.class_id,
+                    obis=desc.obis,
+                    obis_bytes=desc.obis_bytes,
+                    attribute_id=desc.attribute_id,
+                    data_type="null-data",
+                    value=None,
+                    raw_hex="",
+                ))
+
+        result["items"] = items
+        return result
+
+    @classmethod
+    def _infer_data_type(cls, value) -> str:
+        """根据值推断数据类型"""
+        if isinstance(value, bool):
+            return "boolean"
+        elif isinstance(value, int):
+            return "long-unsigned"
+        elif isinstance(value, float):
+            return "float64"
+        elif isinstance(value, bytes):
+            return "octet-string"
+        elif isinstance(value, str):
+            return "utf8-string"
+        elif isinstance(value, list):
+            return "structure"
+        elif value is None:
+            return "null-data"
+        return "unknown"
+
+    @classmethod
+    def _format_value_for_display(cls, value, data_type: str):
+        """格式化值以便显示"""
+        if isinstance(value, bytes):
+            if data_type == "octet-string" and len(value) <= 32:
+                try:
+                    decoded = value.decode("ascii")
+                    if all(32 <= ord(c) < 127 for c in decoded):
+                        return decoded
+                except Exception:
+                    pass
+            return value.hex()
+        elif isinstance(value, list):
+            return f"[{len(value)} elements]"
+        elif value is None:
+            return None
+        return value
+
+    @classmethod
+    def _parse_notification_body_standard(cls, data: bytes, offset: int) -> List[CosemDataItem]:
+        """使用标准BER解析 notification-body（原有逻辑）"""
+        items: List[CosemDataItem] = []
+
+        # 使用BER解码array
+        array_value, end_offset, type_name = decode_data(data, offset)
+
+        if not isinstance(array_value, list):
             return items
 
-        # 策略1: 标准BER编码
-        try:
-            items_ber = cls._parse_notification_body_ber(data, offset)
-            if items_ber and len(items_ber) > 0:
-                return items_ber
-        except Exception:
-            pass
+        # 遍历array中的每个元素（每个是一个structure）
+        for i, struct_item in enumerate(array_value):
+            if not isinstance(struct_item, list) or len(struct_item) < 2:
+                continue
 
-        # 策略2: 手动解析 - 裸9字节描述符
-        try:
-            items_raw = cls._parse_notification_body_raw(data, offset)
-            if items_raw and len(items_raw) > 0:
-                return items_raw
-        except Exception:
-            pass
+            desc = struct_item[0]
+            value_data = struct_item[1]
 
-        # 策略3: OBIS搜索模式 - 搜索所有 09 06 模式
-        try:
-            items_search = cls._parse_notification_body_search(data, offset)
-            if items_search and len(items_search) > 0:
-                return items_search
-        except Exception:
-            pass
+            class_id = 0
+            obis_str = ""
+            obis_bytes = b""
+            attribute_id = 0
 
-        # 所有策略都失败，返回空列表
-        return items
-
-    @classmethod
-    def _parse_notification_body_ber(cls, data: bytes, offset: int) -> List[CosemDataItem]:
-        """策略1: 标准BER编码解析"""
-        items: List[CosemDataItem] = []
-
-        # 处理外层（可能是 array 或 structure）
-        start_offset = offset
-        tag = data[offset]
-
-        if tag in (0x01, 0x02):  # array 或 structure
-            from app.utils.ber_encoder import _decode_length
-            outer_len, outer_start = _decode_length(data, offset + 1)
-            outer_end = outer_start + outer_len
-
-            # 如果外层是 structure，内部可能是 array
-            if tag == 0x02 and outer_start < outer_end and data[outer_start] == 0x01:
-                inner_len, inner_start = _decode_length(data, outer_start + 1)
-                inner_end = inner_start + inner_len
-                array_start = inner_start
-                array_end = inner_end
-            else:
-                array_start = outer_start
-                array_end = outer_end
-
-            # 遍历 array 元素
-            pos = array_start
-            while pos < array_end:
-                if pos >= len(data):
-                    break
-
-                if data[pos] == 0x02:  # structure = DataNotification-Body
-                    struct_len, struct_start = _decode_length(data, pos + 1)
-                    struct_end = struct_start + struct_len
-
-                    if struct_end > len(data):
-                        break
-
-                    # 解析 structure 内部
-                    item = cls._parse_single_body_ber(data, struct_start, struct_end)
-                    if item:
-                        items.append(item)
-
-                    pos = struct_end
-                else:
-                    # 尝试直接 BER 解码
-                    try:
-                        _, new_pos, _ = decode_data(data, pos)
-                        pos = new_pos
-                    except:
-                        pos += 1
-        else:
-            # 直接是值？尝试解码
-            try:
-                _, _, _ = decode_data(data, offset)
-            except:
-                pass
-
-        return items
-
-    @classmethod
-    def _parse_single_body_ber(cls, data: bytes, start: int, end: int) -> Optional[CosemDataItem]:
-        """解析单个 DataNotification-Body (BER 格式)"""
-        pos = start
-        desc = None
-        value = None
-        value_type = ""
-
-        # 第一个元素: descriptor
-        if pos < end:
-            if data[pos] == 0x02:  # BER-encoded descriptor structure
-                from app.utils.ber_encoder import _decode_length
-                desc_len, desc_start = _decode_length(data, pos + 1)
-                desc_end = desc_start + desc_len
-                desc = cls._parse_ber_descriptor(data, desc_start, desc_end)
-                pos = desc_end
-            elif data[pos] == 0x09:  # octet-string descriptor (9字节)
-                from app.utils.ber_encoder import _decode_length
-                os_len, os_start = _decode_length(data, pos + 1)
-                os_end = os_start + os_len
-                if os_len == 9:
-                    desc_bytes = data[os_start:os_end]
-                    desc = {
-                        "class_id": int.from_bytes(desc_bytes[0:2], "big"),
-                        "obis": obis_bytes_to_str(desc_bytes[2:8]),
-                        "obis_bytes": desc_bytes[2:8],
-                        "attribute_id": desc_bytes[8],
-                    }
-                pos = os_end
-            else:
-                # 尝试解码并跳过
-                try:
-                    _, new_pos, _ = decode_data(data, pos)
-                    pos = new_pos
-                except:
-                    pos += 1
-
-        # 第二个元素: value
-        if pos < end:
-            try:
-                value, val_end, value_type = decode_data(data, pos)
-            except:
-                value = data[pos:end].hex()
-                value_type = "raw"
-
-        if desc:
-            return CosemDataItem(
-                class_id=desc["class_id"],
-                obis=desc["obis"],
-                obis_bytes=desc["obis_bytes"],
-                attribute_id=desc["attribute_id"],
-                data_type=value_type,
-                type=value_type,  # 兼容前端
-                value=value,
-                raw_hex=data[start:end].hex(),
-            )
-        return None
-
-    @classmethod
-    def _parse_ber_descriptor(cls, data: bytes, start: int, end: int) -> Optional[dict]:
-        """解析 BER-encoded 的描述符 structure"""
-        class_id = 0
-        obis_bytes = b""
-        attribute_id = 0
-        pos = start
-        field_idx = 0
-
-        while pos < end and field_idx < 3:
-            tag = data[pos]
-
-            if tag == 0x12:  # long-unsigned = class_id
-                from app.utils.ber_encoder import _decode_length
-                val_len, val_start = _decode_length(data, pos + 1)
-                class_id = int.from_bytes(data[val_start:val_start + val_len], "big")
-                pos = val_start + val_len
-                field_idx += 1
-            elif tag == 0x09:  # octet-string = obis
-                from app.utils.ber_encoder import _decode_length
-                val_len, val_start = _decode_length(data, pos + 1)
-                obis_bytes = data[val_start:val_start + val_len]
-                pos = val_start + val_len
-                field_idx += 1
-            elif tag == 0x0F:  # integer = attribute_id
-                from app.utils.ber_encoder import _decode_length
-                val_len, val_start = _decode_length(data, pos + 1)
-                attribute_id = int.from_bytes(
-                    data[val_start:val_start + val_len], "big", signed=True
-                )
-                pos = val_start + val_len
-                field_idx += 1
-            else:
-                # 未知 tag，尝试解码跳过
-                try:
-                    _, new_pos, _ = decode_data(data, pos)
-                    pos = new_pos
-                except:
-                    pos += 1
-
-        if len(obis_bytes) == 6:
-            return {
-                "class_id": class_id,
-                "obis": obis_bytes_to_str(obis_bytes),
-                "obis_bytes": obis_bytes,
-                "attribute_id": attribute_id,
-            }
-        return None
-
-    @classmethod
-    def _parse_notification_body_raw(cls, data: bytes, offset: int) -> List[CosemDataItem]:
-        """策略2: 裸9字节描述符 + BER值"""
-        items: List[CosemDataItem] = []
-        from app.utils.ber_encoder import _decode_length
-
-        pos = offset
-        end = len(data)
-
-        # 跳过外层 structure/array
-        if pos < end and data[pos] == 0x02:
-            outer_len, outer_start = _decode_length(data, pos + 1)
-            outer_end = outer_start + outer_len
-            if outer_end <= len(data):
-                if outer_start < outer_end and data[outer_start] == 0x01:
-                    inner_len, inner_start = _decode_length(data, outer_start + 1)
-                    inner_end = inner_start + inner_len
-                    parse_start = inner_start
-                    parse_end = inner_end
-                else:
-                    parse_start = outer_start
-                    parse_end = outer_end
-            else:
-                parse_start = pos
-                parse_end = end
-        elif pos < end and data[pos] == 0x01:
-            outer_len, outer_start = _decode_length(data, pos + 1)
-            parse_start = outer_start
-            parse_end = outer_start + outer_len
-        else:
-            parse_start = pos
-            parse_end = end
-
-        # 在解析范围内查找条目
-        pos = parse_start
-        while pos + 9 < parse_end:
-            # 检查当前位置是不是 structure tag
-            if data[pos] == 0x02:
-                struct_len, struct_start = _decode_length(data, pos + 1)
-                struct_end = struct_start + struct_len
-
-                if struct_end > parse_end or struct_end > len(data):
-                    break
-
-                # 尝试裸9字节描述符
-                if struct_start + 9 <= struct_end:
-                    class_id = int.from_bytes(data[struct_start:struct_start+2], "big")
-                    obis_bytes = data[struct_start+2:struct_start+8]
-                    attr_id = data[struct_start+8]
-
-                    # 合理性检查
-                    if 1 <= class_id <= 500 and 1 <= attr_id <= 100:
-                        val_pos = struct_start + 9
-                        value = None
-                        value_type = ""
-                        try:
-                            value, val_end, value_type = decode_data(data, val_pos)
-                        except:
-                            value = data[val_pos:struct_end].hex()
-                            value_type = "raw"
-
-                        obis_str = obis_bytes_to_str(obis_bytes)
-                        items.append(CosemDataItem(
-                            class_id=class_id,
-                            obis=obis_str,
-                            obis_bytes=obis_bytes,
-                            attribute_id=attr_id,
-                            data_type=value_type,
-                            type=value_type,
-                            value=value,
-                            raw_hex=data[pos:struct_end].hex(),
-                        ))
-
-                pos = struct_end
-            else:
-                pos += 1
-
-        return items
-
-    @classmethod
-    def _parse_notification_body_search(cls, data: bytes, offset: int) -> List[CosemDataItem]:
-        """策略3: 搜索所有 OBIS (09 06) 模式，向前向后推断描述符
-        
-        DLMS 紧凑 BER 描述符结构（13字节）:
-        - long-unsigned (tag=0x12 + 2字节值) = class_id (3字节)
-        - octet-string (tag=0x09 + length + 6字节值) = OBIS (8字节)
-        - integer (tag=0x0F + 1字节值) = attribute_id (2字节)
-        """
-        items: List[CosemDataItem] = []
-
-        # 搜索所有 09 06 模式（OBIS 的 tag+length）
-        pos = offset
-        while pos < len(data) - 8:
-            if data[pos] == 0x09 and data[pos+1] == 0x06:
-                obis_bytes = data[pos+2:pos+8]
+            if isinstance(desc, list) and len(desc) >= 3:
+                class_id = int(desc[0]) if isinstance(desc[0], int) else 0
+                obis_bytes = desc[1] if isinstance(desc[1], (bytes, bytearray)) else b""
+                if isinstance(obis_bytes, (bytes, bytearray)) and len(obis_bytes) == 6:
+                    obis_str = obis_bytes_to_str(obis_bytes)
+                attribute_id = int(desc[2]) if isinstance(desc[2], int) else 0
+            elif isinstance(desc, (bytes, bytearray)) and len(desc) == 9:
+                class_id = int.from_bytes(desc[0:2], "big")
+                obis_bytes = desc[2:8]
                 obis_str = obis_bytes_to_str(obis_bytes)
+                attribute_id = desc[8]
 
-                # 向前找 class_id
-                # long-unsigned (tag=0x12) 在 OBIS tag 前 3 字节
-                # class_id 值是 tag 后面的 2 字节
-                class_id = 0
-                if pos >= 3 and data[pos-3] == 0x12:
-                    class_id = int.from_bytes(data[pos-2:pos], "big")
-                elif pos >= 2:
-                    # 回退：直接取前 2 字节
-                    class_id = int.from_bytes(data[pos-2:pos], "big")
+            data_type = cls._infer_data_type(value_data)
 
-                # 向后找 attribute_id
-                # integer (tag=0x0F) 在 OBIS 值结束后
-                # attribute_id 值是 tag 后面的 1 字节（有符号）
-                attr_id = 0
-                obis_end = pos + 8  # OBIS TLV 结束位置
-                if obis_end < len(data) and data[obis_end] == 0x0F:
-                    # integer tag 后面的 1 字节是值（有符号）
-                    if obis_end + 1 < len(data):
-                        attr_raw = data[obis_end + 1]
-                        # 转换为有符号 8 位整数
-                        attr_id = attr_raw if attr_raw < 128 else attr_raw - 256
-                elif obis_end < len(data):
-                    # 回退：直接取 OBIS 后面的字节
-                    attr_id = data[obis_end]
-
-                # 向后找值（attribute_id 之后）
-                value = None
-                value_type = ""
-                val_start = obis_end + 2  # 跳过 integer tag + value
-                if val_start < len(data):
-                    try:
-                        value, val_end, value_type = decode_data(data, val_start)
-                    except:
-                        pass
-
-                # 合理性检查
-                if 1 <= class_id <= 500 and 1 <= attr_id <= 50 and len(obis_bytes) == 6:
-                    items.append(CosemDataItem(
-                        class_id=class_id,
-                        obis=obis_str,
-                        obis_bytes=obis_bytes,
-                        attribute_id=attr_id,
-                        data_type=value_type,
-                        type=value_type,
-                        value=value,
-                        raw_hex="",
-                    ))
-
-            pos += 1
+            items.append(CosemDataItem(
+                class_id=class_id,
+                obis=obis_str,
+                obis_bytes=obis_bytes,
+                attribute_id=attribute_id,
+                data_type=data_type,
+                value=value_data,
+                raw_hex="",
+            ))
 
         return items
 
