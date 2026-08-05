@@ -277,7 +277,7 @@ def parse_frame(
                 for item in apdu_obj.items:
                     matched = data_model_manager.match_obis(
                         class_id=item.class_id,
-                        obis_bytes=hex_to_bytes(item.obis) if item.obis else b'',
+                        obis_bytes=item.obis_bytes if hasattr(item, 'obis_bytes') and item.obis_bytes else (hex_to_bytes(item.obis) if item.obis else b''),
                         attribute_id=item.attribute_id,
                     )
                     if matched:
