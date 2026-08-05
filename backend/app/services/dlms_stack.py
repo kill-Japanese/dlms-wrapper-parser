@@ -33,6 +33,26 @@ from app.services.datamodel import data_model_manager
 from app.services.log_manager import log_manager
 
 
+def _convert_bytes_to_hex(obj):
+    """
+    递归将对象中的 bytes/bytearray 转换为十六进制字符串。
+    
+    用于解决 Pydantic/FastAPI JSON 序列化时 bytes 类型无法序列化的问题。
+    支持 dict、list、tuple、set 等嵌套结构。
+    """
+    if isinstance(obj, (bytes, bytearray)):
+        return obj.hex()
+    elif isinstance(obj, dict):
+        return {k: _convert_bytes_to_hex(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_convert_bytes_to_hex(item) for item in obj]
+    elif isinstance(obj, tuple):
+        return tuple(_convert_bytes_to_hex(item) for item in obj)
+    elif isinstance(obj, set):
+        return {_convert_bytes_to_hex(item) for item in obj}
+    return obj
+
+
 def parse_frame(
     hex_data: str,
     encryption_key: Optional[str] = None,
@@ -243,7 +263,8 @@ def parse_frame(
         # Step 5: APDU解析
         try:
             apdu_obj = parse_apdu(payload)
-            result.apdu = apdu_obj.model_dump()
+            # 将 bytes 转为 hex 字符串，避免 JSON 序列化失败
+            result.apdu = _convert_bytes_to_hex(apdu_obj.model_dump())
             log_manager.info(
                 frame_id, "apdu",
                 f"APDU解析成功: type={apdu_obj.type_name} (tag={apdu_obj.tag})"

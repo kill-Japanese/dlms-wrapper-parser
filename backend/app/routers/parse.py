@@ -46,8 +46,12 @@ async def parse_hex(request: ParseRequest):
             system_title=request.system_title,
             invocation_counter=request.invocation_counter,
         )
+        # 主动触发序列化验证，确保结果可以正常序列化为JSON
+        # 这样任何序列化问题都会被 try-except 捕获，返回清晰的错误信息
+        result.model_dump_json()
         return result
     except Exception as e:
+        log_manager.add_log("api_error", "error", "parse_hex", f"{e}")
         raise HTTPException(status_code=500, detail=f"解析失败: {e}")
 
 
