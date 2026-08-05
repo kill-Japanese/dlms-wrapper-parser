@@ -20,6 +20,7 @@
 """
 import os
 import re
+import logging
 from typing import Optional, Dict, Tuple, List
 
 from openpyxl import load_workbook
@@ -27,6 +28,10 @@ from openpyxl import load_workbook
 from app.models.datamodel import CosemObject, CosemObjectDetail, CosemAttribute, CosemMethod
 from app.utils.obis_utils import normalize_obis, obis_bytes_to_str
 from app.utils.hex_utils import hex_to_bytes
+from app.services.dlms_model_parser_adapter import (
+    is_parser_available,
+    parse_object_model_sheet,
+)
 
 
 class DataModelManager:
@@ -99,12 +104,17 @@ class DataModelManager:
         format_type = self._detect_format(wb)
 
         count = 0
-        if format_type == "sabesp":
+        if format_type == "object_model":
+            # object_model 格式使用 dlms-model-parser，直接传文件路径
+            object_model_sheet = self._find_object_model_sheet(wb)
+            wb.close()  # 检测完就关闭，dlms-model-parser 自己打开
+            count = self._load_object_model_format(file_path, object_model_sheet)
+        elif format_type == "sabesp":
             count = self._load_sabesp_format(wb)
+            wb.close()
         else:
             count = self._load_standard_format(wb)
-
-        wb.close()
+            wb.close()
 
         if count == 0:
             raise ValueError(
@@ -126,13 +136,23 @@ class DataModelManager:
         """
         自动检测Excel格式
 
+        检测优先级（从高到低）：
+        1. object_model: 存在 "object model" sheet（大小写不敏感），且 dlms-model-parser 可用
+        2. sabesp: 存在 "Object model" sheet 且符合 SABESP 格式特征
+        3. standard: 标准行式格式
+
         Args:
             wb: openpyxl Workbook对象
 
         Returns:
-            str: "standard" 或 "sabesp"
+            str: "object_model" / "sabesp" / "standard"
         """
-        # 检查是否有 "Object model" sheet（SABESP格式特征）
+        # 1. 检查是否有 object model 相关的 sheet（大小写不敏感）
+        object_model_sheet = self._find_object_model_sheet(wb)
+        if object_model_sheet and is_parser_available():
+            return "object_model"
+
+        # 2. 检查精确匹配 "Object model" 的 sheet（SABESP 格式，向后兼容）
         if "Object model" in wb.sheetnames:
             ws = wb["Object model"]
             # 检查前几行是否符合SABESP格式特征
@@ -155,7 +175,7 @@ class DataModelManager:
                 if d_is_class_id and f_is_obis:
                     return "sabesp"
 
-        # 检查活动sheet的表头是否符合标准格式
+        # 3. 检查活动sheet的表头是否符合标准格式
         ws = wb.active
         headers = []
         for row in ws.iter_rows(min_row=1, max_row=1, values_only=True):
@@ -168,6 +188,25 @@ class DataModelManager:
 
         # 默认尝试标准格式
         return "standard"
+
+    @staticmethod
+    def _find_object_model_sheet(wb) -> Optional[str]:
+        """
+        查找名为 "object model" 的 sheet（大小写不敏感，支持空格/下划线/横杠变体）
+
+        Args:
+            wb: openpyxl Workbook 对象
+
+        Returns:
+            匹配的 sheet 名称，未找到返回 None
+        """
+        target_name = "object model"
+        for sheet_name in wb.sheetnames:
+            # 归一化：转小写，下划线和横杠替换为空格
+            name_normalized = sheet_name.strip().lower().replace("_", " ").replace("-", " ")
+            if name_normalized == target_name:
+                return sheet_name
+        return None
 
     def _load_standard_format(self, wb) -> int:
         """
@@ -206,6 +245,123 @@ class DataModelManager:
             except Exception:
                 # 跳过解析失败的行
                 continue
+
+        return count
+
+    def _load_object_model_format(self, file_path: str, sheet_name: str) -> int:
+        """
+        使用 dlms-model-parser 解析 object model sheet
+
+        Args:
+            file_path: Excel 文件路径
+            sheet_name: object model sheet 名称
+
+        Returns:
+            int: 解析出的对象数量
+        """
+        # 调用 dlms-model-parser
+        result = parse_object_model_sheet(file_path, sheet_name)
+        if result is None:
+            # 解析失败，回退到 SABESP 格式解析
+            logger = logging.getLogger(__name__)
+            logger.warning("dlms-model-parser 解析失败，回退到 SABESP 格式")
+            wb = load_workbook(file_path, read_only=True, data_only=True)
+            count = self._load_sabesp_format(wb)
+            wb.close()
+            return count
+
+        classes = result.get("classes", [])
+        count = 0
+
+        for cls in classes:
+            class_id = cls.get("class_id", 0)
+            class_name = cls.get("class_name", "")
+            obis_code = cls.get("obis_code", "")
+            version = str(cls.get("version", ""))
+            category = cls.get("category", "")
+
+            # 跳过没有 OBIS 码的 class（可能是分类标题或模板）
+            if not obis_code:
+                continue
+
+            # 验证 OBIS 格式
+            try:
+                normalize_obis(obis_code)
+            except ValueError:
+                continue
+
+            # 1. 添加对象本身（attribute_id = 0）
+            obj_desc = f"Object: {class_name}"
+            if category:
+                obj_desc += f" (category: {category})"
+
+            obj = CosemObject(
+                class_id=class_id,
+                obis=obis_code,
+                name=class_name,
+                data_type="",
+                description=obj_desc,
+                attribute_id=0,
+                unit="",
+                scaler=1.0,
+                version=version,
+            )
+            self._add_object(obj)
+            count += 1
+
+            # 2. 添加属性（attribute_id > 0）
+            for attr in cls.get("attributes", []):
+                attr_id = attr.get("id", 0)
+                attr_name = attr.get("name", "")
+                data_type = attr.get("data_type", "")
+
+                # 处理 scaler：dlms-model-parser 输出的是整数指数（如 -3），需转为浮点数（如 0.001）
+                scaler = 1.0
+                scaler_exp = attr.get("scaler")
+                if scaler_exp is not None:
+                    try:
+                        scaler = 10 ** float(scaler_exp)
+                    except (ValueError, TypeError):
+                        pass
+
+                # 处理单位：优先使用单位名称，其次使用单位编码
+                unit = attr.get("unit_name", "")
+                if not unit and attr.get("unit") is not None:
+                    unit = f"unit_{attr['unit']}"
+
+                obj = CosemObject(
+                    class_id=class_id,
+                    obis=obis_code,
+                    name=attr_name,
+                    data_type=data_type,
+                    description=f"Attribute: {attr_name}",
+                    attribute_id=attr_id,
+                    unit=unit,
+                    scaler=scaler,
+                    version=version,
+                )
+                self._add_object(obj)
+                count += 1
+
+            # 3. 添加方法（attribute_id < 0，用负数区分）
+            for method in cls.get("methods", []):
+                method_id = method.get("id", 0)
+                method_name = method.get("name", "")
+                data_type = method.get("data_type", "")
+
+                obj = CosemObject(
+                    class_id=class_id,
+                    obis=obis_code,
+                    name=method_name,
+                    data_type=data_type,
+                    description=f"Method: {method_name} (method_id={method_id})",
+                    attribute_id=-method_id,
+                    unit="",
+                    scaler=1.0,
+                    version="",
+                )
+                self._add_object(obj)
+                count += 1
 
         return count
 
