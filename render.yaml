@@ -27,8 +27,9 @@ services:
     rootDir: backend
     # 构建命令：安装 Python 依赖
     buildCommand: pip install --upgrade pip && pip install -r requirements.txt
-    # 启动命令：使用 gunicorn + uvicorn worker 启动 FastAPI（生产环境推荐）
-    startCommand: gunicorn app.main:app --workers 1 --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+    # 启动命令：使用 uvicorn 直接启动 FastAPI
+    # 注意：Render 免费层建议使用 uvicorn 直接启动，gunicorn + UvicornWorker 可能有兼容性问题
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1
     # 健康检查路径
     healthCheckPath: /health
     # 健康检查间隔（秒）

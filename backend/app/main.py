@@ -3,9 +3,10 @@ DLMS Wrapper Parser - FastAPI 主入口
 """
 import asyncio
 import uuid
+import traceback
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
@@ -71,7 +72,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS中间件配置 - 允许所有来源（不使用凭据，避免 * + credentials 的CORS限制）
+# CORS中间件配置 - 允许所有来源
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -79,6 +80,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def add_cors_to_errors(request: Request, call_next):
+    """中间件：确保所有响应（包括错误响应）都有CORS头"""
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        # 捕获所有未处理的异常，返回带CORS头的500响应
+        origin = request.headers.get("origin")
+        error_detail = str(exc)
+        # 只在DEBUG模式下返回完整错误信息
+        if settings.LOG_LEVEL != "DEBUG":
+            error_detail = "Internal Server Error"
+
+        response = JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal Server Error",
+                "message": error_detail,
+            },
+        )
+        # 添加CORS头
+        if origin:
+            if "*" in settings.CORS_ORIGINS or origin in settings.CORS_ORIGINS:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+
+    return response
+
 
 # 注册路由
 app.include_router(parse.router)
@@ -118,21 +153,51 @@ async def websocket_endpoint(websocket: WebSocket):
         ws_manager.disconnect(conn_id)
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
-    """全局异常处理器 - 仅处理未被捕获的异常，HTTPException由FastAPI默认处理"""
-    # HTTPException 由 FastAPI 默认处理，这里跳过
-    if isinstance(exc, HTTPException):
-        from fastapi.exception_handlers import http_exception_handler
-        return await http_exception_handler(request, exc)
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """HTTP异常处理器 - 确保响应有CORS头"""
+    origin = request.headers.get("origin")
+    response = JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail} if isinstance(exc.detail, (str, int, float)) else exc.detail,
+    )
+    # 添加CORS头
+    if origin:
+        if "*" in settings.CORS_ORIGINS or origin in settings.CORS_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
-    return JSONResponse(
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """全局异常处理器 - 捕获所有未处理异常，返回带CORS头的500响应"""
+    # 打印错误日志便于调试
+    print(f"[ERROR] Unhandled exception: {exc}")
+    print(traceback.format_exc())
+
+    origin = request.headers.get("origin")
+    error_msg = str(exc) if settings.LOG_LEVEL == "DEBUG" else "Internal Server Error"
+
+    response = JSONResponse(
         status_code=500,
         content={
             "error": "Internal Server Error",
-            "message": str(exc),
+            "message": error_msg,
         },
     )
+    # 添加CORS头
+    if origin:
+        if "*" in settings.CORS_ORIGINS or origin in settings.CORS_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+    else:
+        response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
 
 if __name__ == "__main__":
