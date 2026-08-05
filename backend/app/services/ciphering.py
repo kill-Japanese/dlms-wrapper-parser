@@ -4,22 +4,26 @@
 DLMS/COSEM 安全加密使用 AES-GCM 算法
 参考: IEC 62056-53 Clause 7.4.2 (Blue Book) / Green Book
 
-加密帧格式 (General-Glo-Ciphering / General-Ciphering):
-- Security Control (1 byte): 安全控制字节
-  - bit 0 (0x01): EK - Encryption Key 使用标识（1=已加密）
-  - bit 1 (0x02): AK - Authentication Key 使用标识（1=已认证）
-  - bit 2 (0x04): 压缩标识（1=已压缩，V.44）
-  - bit 3-4 (0x08, 0x10): Key 类型标识
-    - 00 (0x00) = Unicast / GUEK (Global Unicast Encryption Key)
-    - 01 (0x08) = Broadcast / GUBK (Global Unicast Broadcast Key)
-    - 10 (0x10) = System Key
-  - bit 5 (0x20): ECC 签名标识（1=有ECC签名）
-  - bit 6-7: 保留
-- System Title (8 bytes): 系统标题
-- Length of invocation counter (n)
-- Invocation Counter (n bytes): 调用计数器
-- Ciphered Text (variable): 密文
-- GMAC Tag (12 bytes if authenticated): GMAC认证标签
+General-Glo-Ciphering APDU 格式 (BER-encoded):
+  Tag (1 byte): 0xDB (General-Glo-Ciphering)
+  system-title (OCTET STRING):
+    length (1 byte): 通常为 0x08
+    value (8 bytes): System Title
+  ciphered-service (OCTET STRING):
+    length (variable): 加密服务数据长度
+    value:
+      security-control (1 byte): 安全控制字节
+        bit 0 (0x01): EK - 加密标识
+        bit 1 (0x02): AK - 认证标识
+        bit 2 (0x04): 压缩标识（V.44）
+        bit 3-4 (0x18): Key 类型标识
+          00 = GUEK (Global Unicast Encryption Key)
+          01 = GUBK (Global Unicast Broadcast Key)
+          10 = System Key
+        bit 5 (0x20): ECC 签名标识
+      invocation-counter (4 bytes, big-endian): 调用计数器
+      ciphered-content (variable): 加密的APDU内容
+      GMAC tag (12 bytes): 认证标签（如果有认证）
 """
 from typing import Optional, Tuple, Dict
 
@@ -45,6 +49,38 @@ SC_MASK_AUTHENTICATED = 0x02  # bit 1 - AK (Authentication Key used)
 SC_MASK_COMPRESSED = 0x04     # bit 2 - Compressed (V.44)
 SC_MASK_KEY_ID = 0x18         # bit 3-4 - Key Identifier (0x08 | 0x10)
 SC_MASK_ECC_SIGNED = 0x20     # bit 5 - ECC signature present
+
+
+def _parse_ber_length(data: bytes, offset: int) -> Tuple[int, int]:
+    """
+    解析 BER 长度编码
+
+    Args:
+        data: 数据
+        offset: 起始偏移
+
+    Returns:
+        (length, new_offset): 长度值和新的偏移位置
+    """
+    if offset >= len(data):
+        raise ValueError("数据不足，无法读取长度")
+
+    first = data[offset]
+    offset += 1
+
+    if first & 0x80:
+        # 长格式：最高位为1，低7位表示后续长度字节数
+        num_bytes = first & 0x7F
+        if num_bytes == 0 or offset + num_bytes > len(data):
+            raise ValueError("BER长格式长度无效")
+        length = 0
+        for _ in range(num_bytes):
+            length = (length << 8) | data[offset]
+            offset += 1
+        return length, offset
+    else:
+        # 短格式：最高位为0，直接表示长度
+        return first, offset
 
 
 def select_key_by_id(key_id: int, keys: Dict[str, Optional[bytes]]) -> Optional[bytes]:
@@ -156,13 +192,23 @@ def parse_ciphered(
     keys: Optional[Dict[str, Optional[bytes]]] = None,
 ) -> Tuple[bytes, CipherFrame]:
     """
-    解析加密帧，尝试解密
+    解析 General-Glo-Ciphering 加密帧（BER编码格式），尝试解密
 
-    注意：这是骨架实现，完整实现需要根据DLMS规范处理多种场景。
-    当前实现处理最常见的 General-Glo-Ciphering 格式。
+    输入数据格式（完整的加密APDU，从tag字节开始）:
+      Tag (1 byte): 0xDB (General-Glo-Ciphering) 或 0xDA (General-Ciphering)
+      system-title (OCTET STRING, BER编码):
+        length (1 byte): 通常为 0x08（表示后面8字节是System Title）
+        value (8 bytes): System Title
+      ciphered-service (OCTET STRING, BER编码):
+        length (variable)
+        value:
+          security-control (1 byte)
+          invocation-counter (4 bytes, big-endian)
+          ciphered-content (variable)
+          GMAC tag (12 bytes, if authenticated)
 
     Args:
-        data: 加密帧数据（从安全控制字节开始）
+        data: 加密APDU数据（从tag字节开始，如0xDB）
         key: 解密密钥（16字节AES-128密钥，向后兼容参数）
         keys: 密钥字典，包含 guek, gubk, ak, kek 等
               当提供 keys 时，会根据 key_id 自动选择密钥
@@ -173,44 +219,74 @@ def parse_ciphered(
     Raises:
         CipheringError: 解析或解密失败
     """
-    if len(data) < 1:
-        raise CipheringError("加密帧数据为空")
+    if len(data) < 2:
+        raise CipheringError("加密帧数据太短")
 
     offset = 0
 
-    # 1. 安全控制字节
-    sc_byte = data[offset]
+    # 1. APDU Tag (0xDB = General-Glo-Ciphering, 0xDA = General-Ciphering)
+    tag = data[offset]
     offset += 1
+
+    if tag not in (0xDA, 0xDB, 0xDC, 0xD8):
+        raise CipheringError(f"不是加密APDU，tag={tag:#04x}")
+
+    # 2. System Title (OCTET STRING, BER编码)
+    #    第一个字节是长度（通常是0x08），后面才是真正的System Title
+    try:
+        st_length, offset = _parse_ber_length(data, offset)
+        if st_length == 0 or offset + st_length > len(data):
+            raise CipheringError("System Title 长度无效")
+        system_title = data[offset:offset + st_length]
+        offset += st_length
+    except CipheringError:
+        raise
+    except Exception as e:
+        raise CipheringError(f"解析System Title失败: {e}")
+
+    # 3. Ciphered Service Data (OCTET STRING, BER编码)
+    try:
+        cs_length, offset = _parse_ber_length(data, offset)
+        if cs_length == 0 or offset + cs_length > len(data):
+            raise CipheringError("加密服务数据长度无效")
+        ciphered_service = data[offset:offset + cs_length]
+    except CipheringError:
+        raise
+    except Exception as e:
+        raise CipheringError(f"解析加密服务数据失败: {e}")
+
+    # 4. 解析 ciphered-service 内部结构
+    #    结构: security-control(1) + invocation-counter(4) + ciphered-content + GMAC(12 if auth)
+    cs_offset = 0
+
+    # 4.1 Security Control 字节
+    if cs_offset >= len(ciphered_service):
+        raise CipheringError("数据不足，无法读取安全控制字节")
+    sc_byte = ciphered_service[cs_offset]
+    cs_offset += 1
     cipher_info = _parse_security_control(sc_byte)
 
-    # 2. 系统标题 (8字节)
-    if len(data) < offset + 8:
-        raise CipheringError("数据不足，无法读取系统标题")
-    system_title = data[offset:offset + 8]
-    offset += 8
-
-    # 3. 调用计数器长度和值
-    if offset >= len(data):
-        raise CipheringError("数据不足，无法读取调用计数器长度")
-    ic_length = data[offset]
-    offset += 1
-
-    if len(data) < offset + ic_length:
+    # 4.2 Invocation Counter (4字节，大端序)
+    #    注意：DLMS规范中IC的长度通常是4字节
+    ic_length = 4  # DLMS标准中Invocation Counter为4字节
+    if cs_offset + ic_length > len(ciphered_service):
         raise CipheringError("数据不足，无法读取调用计数器")
-    invocation_counter = int.from_bytes(data[offset:offset + ic_length], "big")
-    offset += ic_length
+    invocation_counter = int.from_bytes(
+        ciphered_service[cs_offset:cs_offset + ic_length], "big"
+    )
+    cs_offset += ic_length
 
-    # 4. 密文数据
-    # 如果有认证，最后12字节是GMAC tag
+    # 4.3 密文数据 + GMAC Tag
+    remaining = ciphered_service[cs_offset:]
     gmac_tag = b""
-    ciphered_data = data[offset:]
+    ciphered_data = remaining
 
-    if cipher_info.authenticated and len(ciphered_data) > 12:
-        gmac_tag = ciphered_data[-12:]
-        ciphered_data = ciphered_data[:-12]
+    # 如果有认证，最后12字节是GMAC tag
+    if cipher_info.authenticated and len(remaining) > 12:
+        gmac_tag = remaining[-12:]
+        ciphered_data = remaining[:-12]
 
     # 5. 选择解密密钥
-    # 如果提供了 keys 字典，根据 key_id 选择对应密钥
     active_key = key
     active_key_name = "default"
     if keys is not None:
@@ -229,22 +305,18 @@ def parse_ciphered(
             gcm_key = _derive_gcm_key(active_key)
             aesgcm = AESGCM(gcm_key)
 
-            # 构建nonce: system_title + invocation_counter
-            nonce = system_title + invocation_counter.to_bytes(
-                max(4, ic_length), "big"
-            )[-12 + len(system_title):]  # 12 - len(system_title) bytes from IC
-            # 标准nonce是 system_title(8) + invocation_counter(4) = 12 bytes
-            ic_bytes = invocation_counter.to_bytes(4, "big")
-            nonce = system_title + ic_bytes[-4:]  # 12 bytes total
-            nonce = nonce[:12]
+            # 构建 Nonce (IV): System Title (8字节) + Invocation Counter (4字节) = 12字节
+            # System Title 已经跳过了长度字节，直接是8字节的值
+            nonce = system_title + invocation_counter.to_bytes(4, "big")
+            nonce = nonce[:12]  # 确保总共12字节
 
-            # 关联数据 (AAD) - 用于认证
-            # 通常包含 security_control 和一些附加数据
+            # 关联数据 (AAD): Security Control 字节
+            # 注意：部分设备的AAD可能包含更多数据，这里先用最基本的SC字节
             aad = bytes([sc_byte])
 
             # 解密
             if cipher_info.authenticated:
-                # 带认证标签
+                # 带认证标签：密文 + 12字节GMAC tag
                 ciphertext_with_tag = ciphered_data + gmac_tag
                 plaintext = aesgcm.decrypt(nonce, ciphertext_with_tag, aad)
             else:
@@ -271,7 +343,7 @@ def parse_ciphered(
         gmac_tag=bytes_to_hex(gmac_tag),
         decrypt_success=decrypt_success,
         cipher_info=cipher_info,
-        extracted_from_frame=True,  # ST和IC始终从帧中提取
+        extracted_from_frame=True,
     )
 
     return plaintext, cipher_frame
@@ -289,7 +361,20 @@ def build_ciphered(
     keys: Optional[Dict[str, Optional[bytes]]] = None,
 ) -> bytes:
     """
-    构建加密帧
+    构建 General-Glo-Ciphering 加密帧（BER编码格式）
+
+    输出格式:
+      Tag (1 byte): 0xDB
+      system-title (OCTET STRING):
+        length (1 byte): 0x08
+        value (8 bytes): System Title
+      ciphered-service (OCTET STRING):
+        length (variable)
+        value:
+          security-control (1 byte)
+          invocation-counter (4 bytes)
+          ciphered-content (variable)
+          GMAC tag (12 bytes, if authenticated)
 
     Args:
         apdu: 明文APDU数据
@@ -304,7 +389,7 @@ def build_ciphered(
               当提供 keys 时，会根据 key_id 自动选择密钥
 
     Returns:
-        bytes: 加密帧数据（包含安全控制字节、系统标题、调用计数器、密文、GMAC tag）
+        bytes: 完整的加密APDU数据（从0xDB tag开始）
 
     Raises:
         CipheringError: 加密失败
@@ -325,27 +410,22 @@ def build_ciphered(
 
     sc_byte = _build_security_control(cipher_info)
 
-    # 调用计数器（4字节）
-    ic_length = 4
-    ic_bytes = invocation_counter.to_bytes(ic_length, "big")
+    # 调用计数器（4字节，大端序）
+    ic_bytes = invocation_counter.to_bytes(4, "big")
 
-    # 构建帧头
-    result = bytes([sc_byte]) + system_title + bytes([ic_length]) + ic_bytes
-
+    # 构建 ciphered-service 的内容
     if not encrypted and not authenticated:
         # 不加密也不认证，直接附加明文
-        result += apdu
-        return result
-
-    # 使用AES-GCM加密
-    try:
+        cs_content = bytes([sc_byte]) + ic_bytes + apdu
+    else:
+        # 使用AES-GCM加密
         if active_key is None:
             raise CipheringError("加密需要提供密钥")
 
         gcm_key = _derive_gcm_key(active_key)
         aesgcm = AESGCM(gcm_key)
 
-        # nonce = system_title(8) + invocation_counter(4) = 12 bytes
+        # Nonce = System Title (8字节) + Invocation Counter (4字节) = 12字节
         nonce = system_title + ic_bytes
         nonce = nonce[:12]
 
@@ -355,22 +435,28 @@ def build_ciphered(
         # 加密并生成认证标签
         ciphertext_with_tag = aesgcm.encrypt(nonce, apdu, aad)
 
-        if authenticated:
-            # 密文 + 12字节GMAC tag
-            result += ciphertext_with_tag
-        else:
-            # 只有密文，没有tag（DLMS中不常见）
-            # AESGCM.encrypt返回密文+tag(16字节)，DLMS使用12字节tag
-            # 这里需要特殊处理
-            # TODO: 处理仅加密不认证的情况
-            result += ciphertext_with_tag
+        # 构建 ciphered-service 内容
+        # SC(1) + IC(4) + ciphertext + tag
+        cs_content = bytes([sc_byte]) + ic_bytes + ciphertext_with_tag
 
-        return result
+    # 构建 ciphered-service OCTET STRING（带BER长度）
+    cs_length = len(cs_content)
+    if cs_length < 0x80:
+        cs_length_bytes = bytes([cs_length])
+    else:
+        # 长格式
+        num_bytes = (cs_length.bit_length() + 7) // 8
+        cs_length_bytes = bytes([0x80 | num_bytes]) + cs_length.to_bytes(num_bytes, "big")
+    cs_octet_string = cs_length_bytes + cs_content
 
-    except CipheringError:
-        raise
-    except Exception as e:
-        raise CipheringError(f"加密失败: {e}") from e
+    # 构建 system-title OCTET STRING（带BER长度）
+    st_length = len(system_title)
+    st_octet_string = bytes([st_length]) + system_title
+
+    # 完整的 General-Glo-Ciphering APDU
+    result = bytes([0xDB]) + st_octet_string + cs_octet_string
+
+    return result
 
 
 def is_ciphered_apdu(tag: int) -> bool:
