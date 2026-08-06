@@ -71,6 +71,12 @@ services:
       - key: CORS_ORIGINS
         value: "*"
 
+      # TCP 服务器自动启动
+      # Render 不支持外部 TCP 访问，设为 false 节省资源
+      # NB 设备 TCP 接入请使用 VPS + Docker 部署
+      - key: TCP_AUTOSTART
+        value: "false"
+
   # ============================================================
   # 前端服务 - React 静态站点
   # ============================================================

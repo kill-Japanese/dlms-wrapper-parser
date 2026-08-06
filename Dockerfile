@@ -39,6 +39,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         gcc \
         libffi-dev \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装后端 Python 依赖
