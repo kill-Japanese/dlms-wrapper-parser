@@ -1,4 +1,4 @@
-import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table } from 'antd'
+import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table, Tooltip } from 'antd'
 import {
   FileTextOutlined,
   DatabaseOutlined,
@@ -8,9 +8,11 @@ import {
   CheckCircleOutlined,
   SettingOutlined,
   InfoCircleOutlined,
-  BulbOutlined
+  BulbOutlined,
+  ClockCircleOutlined,
+  ProfileOutlined
 } from '@ant-design/icons'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 
 const { Text } = Typography
 const { Option } = Select
@@ -21,106 +23,22 @@ const typeIcons = {
   array: <DatabaseOutlined style={{ color: '#52c41a' }} />,
   'long-unsigned': <NumberOutlined style={{ color: '#faad14' }} />,
   'double-long-unsigned': <NumberOutlined style={{ color: '#faad14' }} />,
-  'unsigned': <NumberOutlined style={{ color: '#faad14' }} />,
+  unsigned: <NumberOutlined style={{ color: '#faad14' }} />,
   integer: <NumberOutlined style={{ color: '#faad14' }} />,
   'long-integer': <NumberOutlined style={{ color: '#faad14' }} />,
   'double-long-integer': <NumberOutlined style={{ color: '#faad14' }} />,
+  long: <NumberOutlined style={{ color: '#faad14' }} />,
   'octet-string': <FontSizeOutlined style={{ color: '#722ed1' }} />,
   string: <FontSizeOutlined style={{ color: '#722ed1' }} />,
+  'visible-string': <FontSizeOutlined style={{ color: '#722ed1' }} />,
+  'utf8-string': <FontSizeOutlined style={{ color: '#722ed1' }} />,
   boolean: <CheckCircleOutlined style={{ color: '#13c2c2' }} />,
   'null-data': <ApiOutlined style={{ color: '#8c8c8c' }} />,
+  enum: <NumberOutlined style={{ color: '#eb2f96' }} />,
+  'date-time': <ClockCircleOutlined style={{ color: '#13c2c2' }} />,
+  date: <ClockCircleOutlined style={{ color: '#13c2c2' }} />,
+  time: <ClockCircleOutlined style={{ color: '#13c2c2' }} />,
   default: <FileTextOutlined style={{ color: '#8c8c8c' }} />
-}
-
-// 将数据转换为Tree组件需要的格式
-const convertToTreeData = (data, parentKey = '') => {
-  if (!data) return []
-
-  const nodes = []
-
-  if (data.type === 'structure' || data.type === 'array') {
-    const key = `${parentKey || 'root'}-${data.type}`
-    const children = Array.isArray(data.value)
-      ? data.value.map((item, index) => {
-          const childKey = `${key}-${index}`
-          if (item.type === 'structure' || item.type === 'array') {
-            return {
-              key: childKey,
-              title: (
-                <Space>
-                  {typeIcons[item.type] || typeIcons.default}
-                  <Text strong>{item.name || `Item ${index}`}</Text>
-                  <Tag color="blue" style={{ fontSize: 11 }}>
-                    {item.type}
-                  </Tag>
-                </Space>
-              ),
-              icon: typeIcons[item.type] || typeIcons.default,
-              children: convertToTreeData(item, childKey)
-            }
-          }
-          return {
-            key: childKey,
-            title: (
-              <Space>
-                {typeIcons[item.type] || typeIcons.default}
-                <Text>{item.name || `Item ${index}`}</Text>
-                <Tag style={{ fontSize: 11 }}>{item.type}</Tag>
-                <Text type="secondary" style={{ fontSize: 12 }}>=</Text>
-                <Text code>{formatValue(item)}</Text>
-              </Space>
-            ),
-            icon: typeIcons[item.type] || typeIcons.default,
-            isLeaf: true
-          }
-        })
-      : []
-
-    nodes.push({
-      key,
-      title: (
-        <Space>
-          {typeIcons[data.type] || typeIcons.default}
-          <Text strong>{data.name || data.type}</Text>
-          <Tag color="blue" style={{ fontSize: 11 }}>
-            {data.type}
-          </Tag>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            ({Array.isArray(data.value) ? data.value.length : 0} 项)
-          </Text>
-        </Space>
-      ),
-      icon: typeIcons[data.type] || typeIcons.default,
-      children
-    })
-  } else if (data.type) {
-    const key = `${parentKey || 'root'}-leaf`
-    nodes.push({
-      key,
-      title: (
-        <Space>
-          {typeIcons[data.type] || typeIcons.default}
-          <Text>{data.name || data.type}</Text>
-          <Tag style={{ fontSize: 11 }}>{data.type}</Tag>
-          <Text type="secondary" style={{ fontSize: 12 }}>=</Text>
-          <Text code>{formatValue(data)}</Text>
-        </Space>
-      ),
-      icon: typeIcons[data.type] || typeIcons.default,
-      isLeaf: true
-    })
-  }
-
-  return nodes
-}
-
-// 格式化值显示
-const formatValue = (item) => {
-  if (item.value === undefined || item.value === null) return 'null'
-  if (typeof item.value === 'object') {
-    return JSON.stringify(item.value)
-  }
-  return String(item.value)
 }
 
 // 已知 class 名称映射
@@ -129,16 +47,325 @@ const CLASS_NAMES = {
   3: 'Register',
   4: 'Extended Register',
   5: 'Demand Register',
+  6: 'Register Activation',
   7: 'Profile Generic',
   8: 'Clock',
   9: 'Script Table',
+  10: 'Schedule',
+  11: 'Special Days Table',
   15: 'Association LN',
+  17: 'SAP Assignment',
+  18: 'Image Transfer',
+  19: 'IEC Local Port Setup',
+  20: 'IEC HDLC Setup',
+  21: 'IEC Twisted Pair Setup',
+  22: 'TCP UDP Setup',
+  23: 'IPv4 Setup',
+  24: 'IPv6 Setup',
+  25: 'PPP Setup',
+  26: 'GPRS Modem Setup',
+  27: 'SMTP Setup',
+  28: 'GNSS Setup',
+  29: 'MBus Client Setup',
+  30: 'MBus Slave Setup',
+  31: 'PSTN Modem Setup',
+  32: 'Auto Answer',
+  33: 'Auto Connect',
+  34: 'Disconnect Control',
+  35: 'Limiter',
+  36: 'MBus Diagnostic',
+  37: 'Register Monitor',
+  38: 'Utility Tables',
+  39: 'Communication Port Protection',
   40: 'Push Setup',
+  41: 'Message Handler',
+  42: 'Parameter Monitor',
+  43: 'Wireless Mode Q channel',
+  44: 'MBUS Slave',
+  45: 'Wireless Mode S-FSK',
+  46: 'Wireless Mode S-FSK HHW',
+  47: 'GPRS Diagnostic',
+  48: 'Wireless S-FSK HHW',
+  49: 'PLL',
+  50: 'Tariff Plan',
+  51: 'Communication Port Protection',
+  52: 'Account',
+  53: 'Credit',
+  54: 'Payment',
+  55: 'Token',
+  56: 'Operator',
+  57: 'Currency',
+  58: 'Special Days Table',
+  59: 'Demand Register Extended',
+  60: 'Register Extended',
+  61: 'Status Mapping',
+  62: 'Security Setup',
+  63: 'Security Suite',
   64: 'Security Setup',
+  65: 'Tariff Configuration',
+  66: 'Time Zone',
+  67: 'Calendar',
+  68: 'Action Schedule',
+  69: 'Schedule Table',
   70: 'Disconnect Control',
+  71: 'Limiter',
+  72: 'Service',
+  73: 'Register Table',
+  74: 'Profile Table',
+  75: 'Device Table',
+  76: 'Program',
+  77: 'Program Invocation',
+  78: 'Activity Calendar',
+  79: 'DLMS Port',
+  80: 'Wireless Modem',
+  81: 'Wireless Diagnostic',
+  82: 'Wireless Status',
 }
 
-function APDULayer({ data }) {
+// Clock 属性名称映射
+const CLOCK_ATTRIBUTES = {
+  1: 'logical_name',
+  2: 'time',
+  3: 'time_zone',
+  4: 'status',
+  5: 'daylights_savings_begin',
+  6: 'daylights_savings_end',
+  7: 'daylights_savings_deviation',
+  8: 'daylights_savings_enabled',
+  9: 'clock_base',
+}
+
+// 通用属性名映射（常用 class）
+const CLASS_ATTRIBUTE_NAMES = {
+  1: { 1: 'logical_name', 2: 'value' },
+  3: { 1: 'logical_name', 2: 'value', 3: 'scaler_unit', 4: 'status', 5: 'capture_time' },
+  4: { 1: 'logical_name', 2: 'value', 3: 'scaler_unit', 4: 'status', 5: 'capture_time', 6: 'capture_period' },
+  5: { 1: 'logical_name', 2: 'current_value', 3: 'scaler_unit', 4: 'status', 5: 'capture_time', 6: 'last_average_value', 7: 'last_average_start_time', 8: 'last_average_end_time', 9: 'last_average_period' },
+  7: { 1: 'logical_name', 2: 'buffer', 3: 'capture_objects', 4: 'capture_period', 5: 'sort_method', 6: 'object_list', 7: 'profile_entries', 8: 'profile_entries_in_use', 9: 'entry_descriptions' },
+  8: CLOCK_ATTRIBUTES,
+  15: { 1: 'logical_name', 2: 'object_list', 3: 'associated_partners_id', 4: 'application_context_name', 5: 'xDLMS_context_info', 6: 'authentication_mechanism_name', 7: 'secret', 8: 'association_status', 9: 'security_setup_reference', 10: 'user_list', 11: 'current_user', 12: 'user_list_configuration' },
+  40: { 1: 'logical_name', 2: 'push_object_list', 3: 'send_destination_and_method', 4: 'communication_window', 5: 'repetition_delay', 6: 'number_of_retries', 7: 'push_client_setup_reference' },
+  64: { 1: 'logical_name', 2: 'security_policy', 3: 'security_suite', 4: 'client_system_title', 5: 'server_system_title', 6: 'certificates' },
+}
+
+// 获取属性名称
+function getAttributeName(classId, attrId) {
+  const classAttrs = CLASS_ATTRIBUTE_NAMES[classId]
+  if (classAttrs && classAttrs[attrId]) {
+    return classAttrs[attrId]
+  }
+  return `Attribute ${attrId}`
+}
+
+// 尝试将 octet-string 解析为 date-time
+function tryParseDateTimeFromOctetString(value) {
+  if (!value || typeof value !== 'string') return null
+  
+  // 移除可能的引号和空格
+  let hexStr = value.replace(/"/g, '').replace(/\s/g, '')
+  
+  // 检查是否是 24 个十六进制字符（12 字节）
+  if (hexStr.length !== 24) return null
+  
+  try {
+    const bytes = new Uint8Array(hexStr.match(/.{1,2}/g).map(byte => parseInt(byte, 16)))
+    
+    const year = (bytes[0] << 8) | bytes[1]
+    const month = bytes[2]
+    const day = bytes[3]
+    // const dayOfWeek = bytes[4]
+    const hour = bytes[5]
+    const minute = bytes[6]
+    const second = bytes[7]
+    const hundredths = bytes[8]
+    // const deviation = (bytes[9] << 8) | bytes[10]
+    // const status = bytes[11]
+    
+    // 合理性检查
+    if (year < 2000 || year > 2100) return null
+    if (month < 1 || month > 12) return null
+    if (day < 1 || day > 31) return null
+    if (hour > 23) return null
+    if (minute > 59) return null
+    if (second > 59) return null
+    
+    return {
+      year, month, day, hour, minute, second, hundredths,
+      iso: `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`
+    }
+  } catch {
+    return null
+  }
+}
+
+// 格式化值显示
+function formatValue(item) {
+  if (item.value === undefined || item.value === null) return 'null'
+  
+  // 如果是结构或数组，返回元素个数
+  if (Array.isArray(item.value)) {
+    return `[${item.value.length} elements]`
+  }
+  
+  if (typeof item.value === 'object') {
+    // 如果是 date-time 对象，显示格式化字符串
+    if (item.value.iso) {
+      return item.value.iso
+    }
+    return JSON.stringify(item.value)
+  }
+  
+  return String(item.value)
+}
+
+// 将 CosemDataItem 转换为树形结构数据
+function convertItemsToTreeData(items, parentKey = 'items') {
+  if (!items || items.length === 0) return []
+  
+  return items.map((item, index) => {
+    const key = `${parentKey}-${index}`
+    const classId = item.class_id
+    const className = CLASS_NAMES[classId] || `Class ${classId}`
+    const attrId = item.attribute_id
+    const attrName = getAttributeName(classId, attrId)
+    const dataType = item.data_type || item.type || 'unknown'
+    
+    // 对于 octet-string 类型，尝试解析为 date-time
+    let displayValue = item.value
+    let displayType = dataType
+    let parsedDateTime = null
+    
+    if (dataType === 'octet-string' || dataType === 'octet_string') {
+      // 尝试解析为 date-time（12 字节 octet-string）
+      parsedDateTime = tryParseDateTimeFromOctetString(item.value)
+      if (parsedDateTime) {
+        displayType = 'date-time'
+        displayValue = parsedDateTime
+      }
+    }
+    
+    // 如果值是数组或对象（结构），递归处理
+    if (Array.isArray(item.value)) {
+      // 检查是否是结构数组（每个元素都是对象）
+      const childItems = item.value.map((child, childIdx) => ({
+        class_id: 0,
+        obis: '',
+        attribute_id: 0,
+        data_type: child.type || typeof child.value,
+        type: child.type || typeof child.value,
+        value: child.value !== undefined ? child.value : child,
+        name: child.name || `Element ${childIdx}`
+      }))
+      
+      return {
+        key,
+        title: (
+          <Space size="small" wrap>
+            {typeIcons[displayType] || typeIcons.default}
+            <Tag color="blue" style={{ fontSize: 11 }}>
+              {classId}
+            </Tag>
+            <Text strong>{className}</Text>
+            <Text code style={{ fontSize: 11 }}>{item.obis}</Text>
+            <Tag style={{ fontSize: 11 }}>Attr {attrId}</Tag>
+            <Text type="secondary" style={{ fontSize: 11 }}>{attrName}</Text>
+            <Tag color="green" style={{ fontSize: 11 }}>
+              {displayType}
+            </Tag>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              ({item.value.length} 项)
+            </Text>
+          </Space>
+        ),
+        icon: typeIcons[displayType] || typeIcons.default,
+        children: childItems.length > 0 ? convertNestedToTreeData(childItems, key) : [],
+      }
+    }
+    
+    // 叶子节点
+    return {
+      key,
+      title: (
+        <Space size="small" wrap>
+          {typeIcons[displayType] || typeIcons.default}
+          <Tag color="blue" style={{ fontSize: 11 }}>
+            {classId}
+          </Tag>
+          <Text strong>{className}</Text>
+          <Tooltip title={item.obis}>
+            <Text code style={{ fontSize: 11, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', display: 'inline-block', verticalAlign: 'bottom' }}>
+              {item.obis}
+            </Text>
+          </Tooltip>
+          <Tag style={{ fontSize: 11 }}>Attr {attrId}</Tag>
+          <Text type="secondary" style={{ fontSize: 11 }}>{attrName}</Text>
+          <Tag color={parsedDateTime ? 'cyan' : 'default'} style={{ fontSize: 11 }}>
+            {displayType}
+          </Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>=</Text>
+          <Text code>{formatValue({ ...item, value: displayValue })}</Text>
+        </Space>
+      ),
+      icon: typeIcons[displayType] || typeIcons.default,
+      isLeaf: true,
+    }
+  })
+}
+
+// 嵌套结构转树形数据
+function convertNestedToTreeData(items, parentKey) {
+  return items.map((item, index) => {
+    const key = `${parentKey}-${index}`
+    const dataType = item.data_type || item.type || 'unknown'
+    const isContainer = Array.isArray(item.value) && item.value.length > 0 && 
+      typeof item.value[0] === 'object' && item.value[0] !== null
+    
+    if (isContainer) {
+      const childItems = item.value.map((child, childIdx) => ({
+        class_id: 0,
+        obis: '',
+        attribute_id: 0,
+        data_type: child.type || typeof child.value,
+        type: child.type || typeof child.value,
+        value: child.value !== undefined ? child.value : child,
+        name: child.name || `Element ${childIdx}`
+      }))
+      
+      return {
+        key,
+        title: (
+          <Space size="small">
+            {typeIcons[dataType] || typeIcons.default}
+            <Text>{item.name || `Item ${index}`}</Text>
+            <Tag color="blue" style={{ fontSize: 11 }}>{dataType}</Tag>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              ({item.value.length} 项)
+            </Text>
+          </Space>
+        ),
+        icon: typeIcons[dataType] || typeIcons.default,
+        children: convertNestedToTreeData(childItems, key),
+      }
+    }
+    
+    return {
+      key,
+      title: (
+        <Space size="small" wrap>
+          {typeIcons[dataType] || typeIcons.default}
+          <Text>{item.name || `Item ${index}`}</Text>
+          <Tag style={{ fontSize: 11 }}>{dataType}</Tag>
+          <Text type="secondary" style={{ fontSize: 12 }}>=</Text>
+          <Text code>{formatValue(item)}</Text>
+        </Space>
+      ),
+      icon: typeIcons[dataType] || typeIcons.default,
+      isLeaf: true,
+    }
+  })
+}
+
+function APDULayer({ data, dataModel }) {
   const [selectedVersion, setSelectedVersion] = useState(null)
   const [autoDetect, setAutoDetect] = useState(true)
 
@@ -162,7 +389,10 @@ function APDULayer({ data }) {
   // 优先使用 apdu_type 或 type_name
   const displayType = apdu_type || type_name || `Tag 0x${tag?.toString(16).padStart(2, '0').toUpperCase()}`
 
-  const treeData = items && items.length > 0 ? convertToTreeData({ type: 'array', value: items }) : []
+  const treeData = useMemo(() => {
+    if (!items || items.length === 0) return []
+    return convertItemsToTreeData(items)
+  }, [items])
 
   // 是否是 DataNotification 类型
   const isDataNotification = type_name === 'DataNotification' || apdu_type === 'DataNotification'
@@ -177,10 +407,10 @@ function APDULayer({ data }) {
       render: (_, __, index) => index + 1
     },
     {
-      title: 'Class ID',
+      title: 'Class',
       dataIndex: 'class_id',
       key: 'class_id',
-      width: 80,
+      width: 100,
       render: (val) => (
         <Space>
           <Tag color="blue">{val}</Tag>
@@ -194,27 +424,23 @@ function APDULayer({ data }) {
       title: 'OBIS',
       dataIndex: 'obis',
       key: 'obis',
-      width: 180,
-      render: (val) => <Text code>{val}</Text>
+      width: 150,
+      render: (val) => <Text code style={{ fontSize: 11 }}>{val}</Text>
     },
     {
       title: 'Attr',
       dataIndex: 'attribute_id',
       key: 'attribute_id',
-      width: 60,
+      width: 50,
     },
     {
       title: 'Data Index',
       dataIndex: 'data_index',
       key: 'data_index',
-      width: 90,
+      width: 80,
       render: (val) => val !== undefined && val !== null ? val : '-'
     },
   ]
-
-  // 显示的版本号（自动检测或手动选择）
-  const displayVersion = autoDetect ? push_setup_version : selectedVersion
-  const displayVersionName = autoDetect ? push_setup_version_name : (selectedVersion !== null ? `v${selectedVersion}` : '')
 
   return (
     <div>
@@ -251,7 +477,7 @@ function APDULayer({ data }) {
               )}
               {autoDetect ? (
                 <Tag color="blue" icon={<InfoCircleOutlined />}>
-                  自动识别: {displayVersionName || '未知'}
+                  自动识别: {push_setup_version_name || '未知'}
                 </Tag>
               ) : (
                 <Tag color="orange">手动选择</Tag>
@@ -336,7 +562,7 @@ function APDULayer({ data }) {
       {treeData.length > 0 ? (
         <div
           style={{
-            maxHeight: 400,
+            maxHeight: 450,
             overflow: 'auto',
             padding: 8,
             background: '#fafafa',
