@@ -27,6 +27,7 @@ class ParseResult(BaseModel):
     ciphering: Optional[CipherFrame] = Field(default=None, description="加密层解析结果")
     compression: Optional[dict] = Field(default=None, description="压缩层信息")
     apdu: Optional[dict] = Field(default=None, description="APDU解析结果")
+    push_resolved: Optional[dict] = Field(default=None, description="Push数据深度解析结果（Profile buffer逐元素解析等）")
     matched_objects: List[dict] = Field(default_factory=list, description="匹配到的数据模型对象")
     parse_logs: List[ParseLogEntry] = Field(default_factory=list, description="解析日志")
     errors: List[str] = Field(default_factory=list, description="错误列表")

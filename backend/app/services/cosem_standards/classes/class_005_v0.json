@@ -1,0 +1,68 @@
+{
+  "class_id": 5,
+  "class_name": "Demand register",
+  "version": 0,
+  "description": "IC 5 - Demand register (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.5",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the demand register object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "current_value",
+      "data_type": "Long",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current demand value being accumulated.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "last_average_value",
+      "data_type": "Long",
+      "access_rights": { "get": true, "set": false },
+      "description": "Last average (demand) value from the previous period.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "scaler_unit",
+      "data_type": "octet_string[2]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Scaler and unit of the demand values.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "status",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Status of the demand register.",
+      "mandatory": true
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "reset_current_value",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Reset the current demand value to zero."
+    },
+    {
+      "method_id": 2,
+      "name": "reset_last_average_value",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Reset the last average value to zero."
+    }
+  ]
+}

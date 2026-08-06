@@ -1,0 +1,139 @@
+{
+  "class_id": 45,
+  "class_name": "GSM diagnostics",
+  "version": 0,
+  "description": "IC 45 - GSM diagnostics (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.45",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the GSM diagnostics object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "operator",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current network operator name.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "status",
+      "data_type": "enum",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current GSM modem status.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "capture_time",
+      "data_type": "octet_string[12]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Timestamp when the diagnostics data was captured.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "RSSI",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Received Signal Strength Indicator.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "BER",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Bit Error Rate.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 7,
+      "name": "registration_status",
+      "data_type": "enum",
+      "enum_values": {
+        "0": "not_registered",
+        "1": "registered_home",
+        "2": "searching",
+        "3": "registration_denied",
+        "4": "unknown",
+        "5": "registered_roaming"
+      },
+      "access_rights": { "get": true, "set": false },
+      "description": "GSM network registration status.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 8,
+      "name": "cell_ID",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Cell identifier.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 9,
+      "name": "location_area_code",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Location area code (LAC).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 10,
+      "name": "signal_level",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Signal level (0-31 or 99 for unknown).",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 11,
+      "name": "ber_value",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Bit error rate value (0-7 or 99 for unknown).",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 12,
+      "name": "modem_registration",
+      "data_type": "enum",
+      "access_rights": { "get": true, "set": false },
+      "description": "Modem registration state.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 13,
+      "name": "GPRS_attach",
+      "data_type": "enum",
+      "access_rights": { "get": true, "set": false },
+      "description": "GPRS attach status.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 14,
+      "name": "PDP_context",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": false },
+      "description": "PDP context information.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 15,
+      "name": "network_operator",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": false },
+      "description": "Full network operator name (MCC/MNC).",
+      "mandatory": false
+    }
+  ],
+  "methods": []
+}

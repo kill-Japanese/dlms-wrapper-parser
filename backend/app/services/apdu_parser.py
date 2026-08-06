@@ -273,6 +273,18 @@ class APDUParser:
             std_items = cls._parse_notification_body_standard(data, offset)
             if std_items:
                 default_result["items"] = std_items
+                # 标准 BER 格式：从解析出的 items 生成 push_object_list
+                # 每个 item 的 class_id/obis/attribute_id 就是推送对象描述符
+                default_result["push_object_list"] = [
+                    {
+                        "class_id": item.class_id,
+                        "obis": item.obis,
+                        "instance_id": item.obis,
+                        "attribute_id": item.attribute_id,
+                        "data_index": 0,
+                    }
+                    for item in std_items
+                ]
                 return default_result
         except Exception:
             pass

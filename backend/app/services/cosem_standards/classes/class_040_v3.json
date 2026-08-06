@@ -1,0 +1,114 @@
+{
+  "class_id": 40,
+  "class_name": "Push setup",
+  "version": 3,
+  "description": "IC 40 - Push setup (v3, 兼容 v2/v1)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.40",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the push setup object",
+      "mandatory": true,
+      "since_version": 1
+    },
+    {
+      "attribute_id": 2,
+      "name": "push_object_list",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "class_id", "type": "long-unsigned", "description": "Class ID of the object to push" },
+        { "name": "instance_id", "type": "octet_string[6]", "description": "Logical name (OBIS) of the object" },
+        { "name": "attribute_id", "type": "integer8", "description": "Attribute ID to push" },
+        { "name": "data_index", "type": "long-unsigned", "description": "Data index for array attributes (entry number)" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "List of objects whose attribute values are included in the push data.",
+      "mandatory": true,
+      "since_version": 1
+    },
+    {
+      "attribute_id": 3,
+      "name": "send_destination_and_method",
+      "data_type": "structure",
+      "structure_fields": [
+        { "name": "service", "type": "enum", "description": "Transport service (HDLC, TCP, UDP, etc.)" },
+        { "name": "destination", "type": "octet_string", "description": "Destination address" },
+        { "name": "method", "type": "enum", "description": "Push method" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Destination address and transport method for push notifications.",
+      "mandatory": true,
+      "since_version": 1
+    },
+    {
+      "attribute_id": 4,
+      "name": "communication_window",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "start_time", "type": "octet_string[5]", "description": "Window start time" },
+        { "name": "end_time", "type": "octet_string[5]", "description": "Window end time" },
+        { "name": "enabled_on_day", "type": "bit_string[7]", "description": "Days of week when window is active" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Time windows during which push notifications may be sent.",
+      "mandatory": true,
+      "since_version": 1
+    },
+    {
+      "attribute_id": 5,
+      "name": "randomisation_start_interval",
+      "data_type": "unsigned",
+      "unit": "second",
+      "access_rights": { "get": true, "set": true },
+      "description": "Maximum random delay added to the push start time (0 = no randomisation).",
+      "mandatory": false,
+      "since_version": 2
+    },
+    {
+      "attribute_id": 6,
+      "name": "number_of_retries",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Number of push retries in case of transmission failure.",
+      "mandatory": false,
+      "since_version": 2
+    },
+    {
+      "attribute_id": 7,
+      "name": "retry_delay",
+      "data_type": "long-unsigned",
+      "unit": "second",
+      "access_rights": { "get": true, "set": true },
+      "description": "Delay between push retries in seconds.",
+      "mandatory": false,
+      "since_version": 2
+    },
+    {
+      "attribute_id": 8,
+      "name": "push_processing_period",
+      "data_type": "long-unsigned",
+      "unit": "second",
+      "access_rights": { "get": true, "set": true },
+      "description": "Period between consecutive push processing cycles. v3 only.",
+      "mandatory": false,
+      "since_version": 3
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "push",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Initiate a push operation immediately.",
+      "since_version": 1
+    }
+  ]
+}

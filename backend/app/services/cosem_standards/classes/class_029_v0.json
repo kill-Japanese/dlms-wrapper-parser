@@ -1,0 +1,58 @@
+{
+  "class_id": 29,
+  "class_name": "Auto-answer",
+  "version": 0,
+  "description": "IC 29 - Auto-answer (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.29",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the auto-answer object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "mode",
+      "data_type": "enum",
+      "enum_values": {
+        "0": "disabled",
+        "1": "enabled",
+        "2": "enabled_with_delayed_connect"
+      },
+      "access_rights": { "get": true, "set": true },
+      "description": "Auto-answer operating mode.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "listening_window",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "start_time", "type": "octet_string[12]", "description": "Start of listening window" },
+        { "name": "end_time", "type": "octet_string[12]", "description": "End of listening window" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Listening window(s) during which auto-answer is active.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "status",
+      "data_type": "enum",
+      "enum_values": {
+        "0": "inactive",
+        "1": "incoming_call_phase",
+        "2": "connected"
+      },
+      "access_rights": { "get": true, "set": false },
+      "description": "Current status of the auto-answer function.",
+      "mandatory": true
+    }
+  ],
+  "methods": []
+}

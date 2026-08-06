@@ -1,0 +1,53 @@
+{
+  "class_id": 9,
+  "class_name": "Script table",
+  "version": 0,
+  "description": "IC 9 - Script table (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.9",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the script table object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "scripts",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "script_identifier", "type": "unsigned", "description": "Script index/identifier" },
+        { "name": "script_actions", "type": "array", "description": "Array of script action structures" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Array of scripts, each containing an identifier and a list of actions.",
+      "mandatory": true
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "run",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "index", "type": "unsigned", "description": "Script index to execute" }
+      ],
+      "return_type": "void",
+      "description": "Execute the script at the specified index."
+    },
+    {
+      "method_id": 2,
+      "name": "run_on",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "index", "type": "unsigned", "description": "Script index to execute" }
+      ],
+      "return_type": "void",
+      "description": "Execute the script at the specified index (with additional context)."
+    }
+  ]
+}

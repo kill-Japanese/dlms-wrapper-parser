@@ -1,0 +1,27 @@
+{
+  "class_id": 1,
+  "class_name": "Data",
+  "version": 0,
+  "description": "IC 1 - Data (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.1",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the data object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "value",
+      "data_type": "Data",
+      "access_rights": { "get": true, "set": true },
+      "description": "The value of the data object. Can be any data type.",
+      "mandatory": true
+    }
+  ],
+  "methods": []
+}

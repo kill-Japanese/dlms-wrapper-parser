@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table, Tooltip } from 'antd'
+=======
+import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table, Tooltip, Button, Alert } from 'antd'
+>>>>>>> f27ec0e (feat: Profile Buffer 深度解析 + Capture Objects 配置 + COSEM 标准库)
 import {
   FileTextOutlined,
   DatabaseOutlined,
@@ -10,9 +14,18 @@ import {
   InfoCircleOutlined,
   BulbOutlined,
   ClockCircleOutlined,
+<<<<<<< HEAD
   ProfileOutlined
 } from '@ant-design/icons'
 import { useState, useMemo } from 'react'
+=======
+  ProfileOutlined,
+  EditOutlined
+} from '@ant-design/icons'
+import { useState, useMemo, useCallback } from 'react'
+import ProfileBufferTable from './ProfileBufferTable.jsx'
+import CaptureObjectsEditor from './CaptureObjectsEditor.jsx'
+>>>>>>> f27ec0e (feat: Profile Buffer 深度解析 + Capture Objects 配置 + COSEM 标准库)
 
 const { Text } = Typography
 const { Option } = Select
@@ -365,9 +378,27 @@ function convertNestedToTreeData(items, parentKey) {
   })
 }
 
+<<<<<<< HEAD
 function APDULayer({ data, dataModel }) {
+=======
+function APDULayer({ data, pushResolved }) {
+>>>>>>> f27ec0e (feat: Profile Buffer 深度解析 + Capture Objects 配置 + COSEM 标准库)
   const [selectedVersion, setSelectedVersion] = useState(null)
   const [autoDetect, setAutoDetect] = useState(true)
+  const [editorVisible, setEditorVisible] = useState(false)
+  const [editorObis, setEditorObis] = useState('')
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
+
+  // 打开 Capture Objects 编辑器
+  const openEditor = useCallback((obis) => {
+    setEditorObis(obis || '')
+    setEditorVisible(true)
+  }, [])
+
+  // 编辑器保存成功后重新触发渲染
+  const handleEditorSuccess = useCallback(() => {
+    setRefreshTrigger(prev => prev + 1)
+  }, [])
 
   if (!data) return null
 
@@ -558,6 +589,72 @@ function APDULayer({ data, dataModel }) {
           </div>
         </div>
       )}
+
+      {/* Profile Buffer 深度解析结果展示 */}
+      {isDataNotification && pushResolved && pushResolved.resolved_items && (
+        <div key={refreshTrigger} style={{ marginBottom: 12 }}>
+          {pushResolved.resolved_items
+            .filter(item => item.type === 'profile_buffer')
+            .map((item, idx) => (
+              <ProfileBufferTable
+                key={idx}
+                profileBuffer={item.profile_buffer}
+                onConfigure={openEditor}
+              />
+            ))}
+          {/* 普通对象增强展示 */}
+          {pushResolved.resolved_items
+            .filter(item => item.type === 'normal_object' && item.push_object)
+            .length > 0 && (
+            <Card size="small" style={{ marginBottom: 12 }}>
+              <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                <Text strong>推送对象增强信息</Text>
+                {pushResolved.resolved_items
+                  .filter(item => item.type === 'normal_object' && item.push_object)
+                  .map((item, idx) => {
+                    const po = item.push_object
+                    const enh = item.enhanced || {}
+                    return (
+                      <Space key={idx} size="small">
+                        <Tag color="blue">{po.class_id}</Tag>
+                        <Text type="secondary" style={{ fontSize: 11 }}>{po.class_name}</Text>
+                        <Text code style={{ fontSize: 11 }}>{po.obis}</Text>
+                        <Tag>A{po.attribute_id}</Tag>
+                        <Text type="secondary" style={{ fontSize: 11 }}>{po.attribute_name}</Text>
+                        <Text code>{enh.formatted_value || item.raw_value}</Text>
+                        {enh.unit && <Tag color="cyan">{enh.unit}</Tag>}
+                      </Space>
+                    )
+                  })}
+              </Space>
+            </Card>
+          )}
+          {/* 警告信息 */}
+          {pushResolved.warnings && pushResolved.warnings.length > 0 && (
+            <Alert
+              type="info"
+              showIcon
+              message={`Push 解析提示 (${pushResolved.warnings.length} 条)`}
+              description={
+                <ul style={{ margin: 0, paddingLeft: 20 }}>
+                  {pushResolved.warnings.map((w, idx) => (
+                    <li key={idx} style={{ fontSize: 12, color: '#8c8c8c' }}>{w}</li>
+                  ))}
+                </ul>
+              }
+              style={{ marginBottom: 12 }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* Capture Objects 编辑器弹窗 */}
+      <CaptureObjectsEditor
+        visible={editorVisible}
+        onClose={() => setEditorVisible(false)}
+        profileObis={editorObis}
+        onSuccess={handleEditorSuccess}
+      />
 
       {treeData.length > 0 ? (
         <div

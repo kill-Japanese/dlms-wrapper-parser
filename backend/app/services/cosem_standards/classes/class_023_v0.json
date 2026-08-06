@@ -1,0 +1,123 @@
+{
+  "class_id": 23,
+  "class_name": "IEC HDLC setup",
+  "version": 0,
+  "description": "IC 23 - IEC HDLC setup (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.23",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the IEC HDLC setup object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "comm_speed",
+      "data_type": "enum",
+      "access_rights": { "get": true, "set": true },
+      "description": "Communication speed (baud rate).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "window_size_transmit",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Transmit window size for HDLC.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "window_size_receive",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Receive window size for HDLC.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "max_info_field_length_transmit",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Maximum information field length for transmission.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "max_info_field_length_receive",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Maximum information field length for reception.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 7,
+      "name": "inter_octet_time_out",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Inter-octet timeout in milliseconds.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 8,
+      "name": "inactivity_time_out",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Inactivity timeout in seconds.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 9,
+      "name": "device_address",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Device address (station address).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 10,
+      "name": "hdlc_lower_layer_address_destination",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "HDLC destination address for lower layer.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 11,
+      "name": "hdlc_lower_layer_address_source",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "HDLC source address for lower layer.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 12,
+      "name": "plc_hdlc_specific_parameters",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": true },
+      "description": "PLC HDLC specific parameters.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 13,
+      "name": "hdlc_major_version",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "HDLC major version number.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 14,
+      "name": "hdlc_minor_version",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "HDLC minor version number.",
+      "mandatory": false
+    }
+  ],
+  "methods": []
+}

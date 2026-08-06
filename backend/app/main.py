@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
 from app.config import settings
-from app.routers import parse, datamodel, stream, auto, pull
+from app.routers import parse, datamodel, stream, auto, pull, standards, profile_capture
 from app.services.tcp_server import tcp_server
 from app.services.auto_handler import auto_handler
 from app.services.log_manager import log_manager
@@ -121,6 +121,8 @@ app.include_router(datamodel.router)
 app.include_router(stream.router)
 app.include_router(auto.router)
 app.include_router(pull.router)
+app.include_router(standards.router)
+app.include_router(profile_capture.router)
 
 
 @app.get("/health", summary="健康检查")

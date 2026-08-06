@@ -190,7 +190,7 @@ function LayerView() {
                 bodyStyle={{ padding: 12 }}
               >
                 {hasData ? (
-                  <LayerComponent data={layer.data} />
+                  <LayerComponent data={layer.data} pushResolved={parseResult.push_resolved} />
                 ) : (
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     该层未启用或无数据

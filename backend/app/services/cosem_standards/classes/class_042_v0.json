@@ -1,0 +1,147 @@
+{
+  "class_id": 42,
+  "class_name": "IPv4 setup",
+  "version": 0,
+  "description": "IC 42 - IPv4 setup (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.42",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the IPv4 setup object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "IP_reference",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Reference to the IP stack object.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "IP_address",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "IPv4 address (32-bit unsigned).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "multicast_address",
+      "data_type": "array",
+      "element_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Array of multicast IPv4 addresses.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 5,
+      "name": "IP_options",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "IP options flags.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 6,
+      "name": "subnet_mask",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Subnet mask (32-bit unsigned).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 7,
+      "name": "gateway_IP_address",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Gateway IPv4 address.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 8,
+      "name": "use_DHCP_flag",
+      "data_type": "boolean",
+      "access_rights": { "get": true, "set": true },
+      "description": "Flag to enable/disable DHCP for IP address assignment.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 9,
+      "name": "primary_DNS_address",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Primary DNS server IPv4 address.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 10,
+      "name": "secondary_DNS_address",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Secondary DNS server IPv4 address.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 11,
+      "name": "DHCP_mess_interval",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "DHCP message interval in seconds.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 12,
+      "name": "DHCP_mess_retry",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "DHCP message retry count.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 13,
+      "name": "DHCP_request_options",
+      "data_type": "array",
+      "element_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "DHCP request options list.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 14,
+      "name": "DHCP_server_address",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "DHCP server IPv4 address.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 15,
+      "name": "IP_address_origin",
+      "data_type": "enum",
+      "enum_values": {
+        "0": "static",
+        "1": "dhcp",
+        "2": "auto_ip",
+        "3": "ppp"
+      },
+      "access_rights": { "get": true, "set": false },
+      "description": "Origin of the current IP address.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 16,
+      "name": "IP_lease_time",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "IP address lease time in seconds (for DHCP).",
+      "mandatory": false
+    }
+  ],
+  "methods": []
+}

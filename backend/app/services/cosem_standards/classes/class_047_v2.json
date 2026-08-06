@@ -1,0 +1,33 @@
+{
+  "class_id": 47,
+  "class_name": "Special days table",
+  "version": 2,
+  "description": "IC 47 - Special days table (v2)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.47",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the special days table object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "special_days_table",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "index", "type": "long-unsigned", "description": "Special day entry index" },
+        { "name": "date", "type": "octet_string[12]", "description": "Special day date (date-time format)" },
+        { "name": "day_id", "type": "unsigned", "description": "Reference to day profile" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Table of special days with index, date, and corresponding day profile reference.",
+      "mandatory": true
+    }
+  ],
+  "methods": []
+}

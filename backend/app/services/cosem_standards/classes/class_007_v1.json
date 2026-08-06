@@ -1,0 +1,133 @@
+{
+  "class_id": 7,
+  "class_name": "Profile generic",
+  "version": 1,
+  "description": "IC 7 - Profile generic (v1)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.7",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the profile generic object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "buffer",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": "dynamic (defined by capture_objects, attribute 3)",
+      "access_rights": { "get": true, "set": false },
+      "description": "Data buffer containing profile entries. Each entry is a structure whose elements correspond to the capture_objects list.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "capture_objects",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "class_id", "type": "long-unsigned", "description": "Class ID of the captured object" },
+        { "name": "instance_id", "type": "octet_string[6]", "description": "Logical name (OBIS) of the captured object" },
+        { "name": "attribute_id", "type": "integer8", "description": "Attribute ID of the captured object" },
+        { "name": "data_index", "type": "long-unsigned", "description": "Data index for array attributes (0 for scalar)" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "List of objects whose values are captured into the buffer. Defines the structure of each buffer entry.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "capture_period",
+      "data_type": "long-unsigned",
+      "unit": "second",
+      "access_rights": { "get": true, "set": true },
+      "description": "Interval between two consecutive captures in seconds. 0 = not periodic.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "sort_method",
+      "data_type": "enum",
+      "enum_values": {
+        "1": "by FIFO (unsorted)",
+        "2": "by date_time (chronological order)",
+        "3": "by value of column 1 (ascending)",
+        "4": "by value of column 1 (descending)",
+        "5": "by value of column 2 (ascending)",
+        "6": "by value of column 2 (descending)",
+        "7": "by value of column 3 (ascending)",
+        "8": "by value of column 3 (descending)",
+        "9": "by value of column n (ascending)",
+        "10": "by value of column n (descending)"
+      },
+      "access_rights": { "get": true, "set": true },
+      "description": "Defines how entries in the buffer are sorted.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "number_of_entries",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current number of entries in the buffer.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 7,
+      "name": "profile_entries",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Maximum number of entries the buffer can hold (buffer capacity).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 8,
+      "name": "status",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Status of the profile generic object (e.g. overflow, disabled).",
+      "mandatory": false
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "reset",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Reset (clear) the buffer and status."
+    },
+    {
+      "method_id": 2,
+      "name": "capture",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Trigger a capture of all capture_objects into the buffer."
+    },
+    {
+      "method_id": 3,
+      "name": "get_data_by_range",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "start_time", "type": "octet_string[12]", "description": "Start date-time" },
+        { "name": "end_time", "type": "octet_string[12]", "description": "End date-time" }
+      ],
+      "return_type": "array",
+      "description": "Retrieve entries within a time range."
+    },
+    {
+      "method_id": 4,
+      "name": "get_next_block",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "array",
+      "description": "Retrieve the next block of data (for large datasets)."
+    }
+  ]
+}

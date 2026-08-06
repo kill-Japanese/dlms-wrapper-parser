@@ -1,0 +1,155 @@
+{
+  "class_id": 15,
+  "class_name": "Association LN",
+  "version": 3,
+  "description": "IC 15 - Association logical name (v3)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.15",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the association object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "object_list",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "class_id", "type": "long-unsigned", "description": "Class ID" },
+        { "name": "instance_id", "type": "octet_string[6]", "description": "Logical name (OBIS)" },
+        { "name": "version", "type": "unsigned", "description": "Version" },
+        { "name": "access_rights", "type": "structure", "description": "Access rights for attributes and methods" }
+      ],
+      "access_rights": { "get": true, "set": false },
+      "description": "List of COSEM objects accessible through this association.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "associated_partners_id",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the associated partner (client system title).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "application_context_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Application context name used for the association.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "xDLMS_context_title",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": false },
+      "description": "xDLMS context title (AP title).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "negotiated_quality_of_service",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Negotiated quality of service for the association.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 7,
+      "name": "dld_reference",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": false },
+      "description": "Reference to the data link layer.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 8,
+      "name": "conformance_block",
+      "data_type": "bit_string[24]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Conformance block indicating supported features (24 bits).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 9,
+      "name": "client_max_receive_pdu_size",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Maximum PDU size the client can receive.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 10,
+      "name": "server_max_receive_pdu_size",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Maximum PDU size the server can receive.",
+      "mandatory": true
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "add_object",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "class_id", "type": "long-unsigned", "description": "Class ID" },
+        { "name": "instance_id", "type": "octet_string[6]", "description": "Logical name" },
+        { "name": "version", "type": "unsigned", "description": "Version" },
+        { "name": "access_rights", "type": "structure", "description": "Access rights" }
+      ],
+      "return_type": "void",
+      "description": "Add an object to the association's object list."
+    },
+    {
+      "method_id": 2,
+      "name": "remove_object",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "class_id", "type": "long-unsigned", "description": "Class ID" },
+        { "name": "instance_id", "type": "octet_string[6]", "description": "Logical name" }
+      ],
+      "return_type": "void",
+      "description": "Remove an object from the association's object list."
+    },
+    {
+      "method_id": 3,
+      "name": "get_attribute_access_rights",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "class_id", "type": "long-unsigned", "description": "Class ID" },
+        { "name": "instance_id", "type": "octet_string[6]", "description": "Logical name" },
+        { "name": "attribute_id", "type": "integer8", "description": "Attribute ID" }
+      ],
+      "return_type": "structure",
+      "description": "Get the access rights for a specific attribute of an object."
+    },
+    {
+      "method_id": 4,
+      "name": "get_method_access_rights",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "class_id", "type": "long-unsigned", "description": "Class ID" },
+        { "name": "instance_id", "type": "octet_string[6]", "description": "Logical name" },
+        { "name": "method_id", "type": "integer8", "description": "Method ID" }
+      ],
+      "return_type": "structure",
+      "description": "Get the access rights for a specific method of an object."
+    },
+    {
+      "method_id": 5,
+      "name": "object_list",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "array",
+      "description": "Get the complete object list of the association."
+    }
+  ]
+}

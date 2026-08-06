@@ -1,0 +1,32 @@
+{
+  "class_id": 17,
+  "class_name": "SAP assignment",
+  "version": 0,
+  "description": "IC 17 - SAP assignment (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.17",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the SAP assignment object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "SAP_assignment_list",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "SAP", "type": "unsigned", "description": "Service Access Point identifier" },
+        { "name": "logical_device_name", "type": "octet_string[6]", "description": "Logical name of the associated device" }
+      ],
+      "access_rights": { "get": true, "set": false },
+      "description": "List of SAP assignments mapping service access points to logical devices.",
+      "mandatory": true
+    }
+  ],
+  "methods": []
+}

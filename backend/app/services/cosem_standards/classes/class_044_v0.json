@@ -1,0 +1,160 @@
+{
+  "class_id": 44,
+  "class_name": "PPP setup",
+  "version": 0,
+  "description": "IC 44 - PPP setup (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.44",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the PPP setup object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "IP_reference",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Reference to the IP setup object.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "phys_reference",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Reference to the physical layer setup object.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "LCP_options",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": true },
+      "description": "Link Control Protocol options.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "authentication_mechanism_name",
+      "data_type": "enum",
+      "enum_values": {
+        "0": "none",
+        "1": "PAP",
+        "2": "CHAP"
+      },
+      "access_rights": { "get": true, "set": true },
+      "description": "Authentication mechanism used for PPP.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "authentication_secret",
+      "data_type": "octet_string",
+      "access_rights": { "get": false, "set": true },
+      "description": "Authentication secret/password.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 7,
+      "name": "IPCP_options",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": true },
+      "description": "IP Control Protocol options.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 8,
+      "name": "PPP_disconnect_time",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP disconnect timeout in seconds.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 9,
+      "name": "password",
+      "data_type": "octet_string",
+      "access_rights": { "get": false, "set": true },
+      "description": "PPP password for authentication.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 10,
+      "name": "username",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP username for authentication.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 11,
+      "name": "authentication_type",
+      "data_type": "enum",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP authentication type.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 12,
+      "name": "PPP_mru",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP Maximum Receive Unit size.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 13,
+      "name": "PPP_LCP",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP Link Control Protocol configuration.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 14,
+      "name": "PPP_IPCP",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP Internet Protocol Control Protocol configuration.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 15,
+      "name": "PPP_IPv6CP",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP IPv6 Control Protocol configuration.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 16,
+      "name": "PPP_quality",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": false },
+      "description": "PPP link quality parameters.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 17,
+      "name": "PPP_link_control",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": true },
+      "description": "PPP link control configuration.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 18,
+      "name": "PPP_diagnostics",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": false },
+      "description": "PPP diagnostics data.",
+      "mandatory": false
+    }
+  ],
+  "methods": []
+}

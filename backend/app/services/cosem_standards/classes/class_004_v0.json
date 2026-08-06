@@ -1,0 +1,43 @@
+{
+  "class_id": 4,
+  "class_name": "Extended register",
+  "version": 0,
+  "description": "IC 4 - Extended register (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.4",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the extended register object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "value",
+      "data_type": "Long",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current value of the extended register.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "scaler_unit",
+      "data_type": "octet_string[2]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Scaler and unit of the register value.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "status",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Status of the extended register (e.g. validity flags).",
+      "mandatory": true
+    }
+  ],
+  "methods": []
+}

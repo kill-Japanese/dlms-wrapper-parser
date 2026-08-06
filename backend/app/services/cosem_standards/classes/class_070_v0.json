@@ -1,0 +1,106 @@
+{
+  "class_id": 70,
+  "class_name": "Disconnect control",
+  "version": 0,
+  "description": "IC 70 - Disconnect control (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.70",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the disconnect control object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "output_state",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current output state of the disconnect relay (0=disconnected, 1=connected).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "control_state",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current control state of the disconnect function.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "control_mode",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Control mode selection (e.g. remote, manual, both).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "control_effect",
+      "data_type": "enum",
+      "enum_values": {
+        "0": "no_effect",
+        "1": "disconnect",
+        "2": "reconnect",
+        "3": "reconnect_on_next_tariff"
+      },
+      "access_rights": { "get": true, "set": true },
+      "description": "Effect of control actions on the output.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "time_position1",
+      "data_type": "octet_string[12]",
+      "access_rights": { "get": true, "set": true },
+      "description": "First scheduled time position for timed control.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 7,
+      "name": "time_position2",
+      "data_type": "octet_string[12]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Second scheduled time position for timed control.",
+      "mandatory": false
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "remote_disconnect",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Remotely disconnect the relay/switch."
+    },
+    {
+      "method_id": 2,
+      "name": "remote_reconnect",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Remotely reconnect the relay/switch."
+    },
+    {
+      "method_id": 3,
+      "name": "manual_disconnect",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Initiate manual disconnect procedure."
+    },
+    {
+      "method_id": 4,
+      "name": "manual_reconnect",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Initiate manual reconnect procedure."
+    }
+  ]
+}

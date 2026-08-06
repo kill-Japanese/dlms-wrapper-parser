@@ -1,0 +1,120 @@
+{
+  "class_id": 64,
+  "class_name": "Security setup",
+  "version": 1,
+  "description": "IC 64 - Security setup (v1)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.64",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the security setup object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "security_policy",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Security policy bitmask defining enabled security features.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "security_suite",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Active security suite identifier (0=base, 1=suite 1, 2=suite 2).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "client_system_title",
+      "data_type": "octet_string[8]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Client system title (8 bytes).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "server_system_title",
+      "data_type": "octet_string[8]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Server system title (8 bytes).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "master_key",
+      "data_type": "octet_string",
+      "access_rights": { "get": false, "set": true },
+      "description": "Master key used for key derivation.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 7,
+      "name": "global_unicast_encryption_key",
+      "data_type": "octet_string",
+      "access_rights": { "get": false, "set": true },
+      "description": "Global unicast encryption key.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 8,
+      "name": "global_broadcast_encryption_key",
+      "data_type": "octet_string",
+      "access_rights": { "get": false, "set": true },
+      "description": "Global broadcast encryption key.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 9,
+      "name": "authentication_key",
+      "data_type": "octet_string",
+      "access_rights": { "get": false, "set": true },
+      "description": "Authentication key for message authentication.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 10,
+      "name": "frame_counter",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current frame counter value for replay protection.",
+      "mandatory": true
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "activate",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "security_suite", "type": "unsigned", "description": "Security suite to activate" }
+      ],
+      "return_type": "void",
+      "description": "Activate a specific security suite."
+    },
+    {
+      "method_id": 2,
+      "name": "get_available_suites",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "array",
+      "description": "Get the list of available security suites."
+    },
+    {
+      "method_id": 3,
+      "name": "key_negotiation",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "key_negotiation_data", "type": "octet_string", "description": "Key negotiation data" }
+      ],
+      "return_type": "octet_string",
+      "description": "Perform key negotiation (e.g. ECDH key exchange)."
+    }
+  ]
+}

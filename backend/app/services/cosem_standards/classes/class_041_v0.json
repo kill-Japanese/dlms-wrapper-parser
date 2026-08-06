@@ -1,0 +1,115 @@
+{
+  "class_id": 41,
+  "class_name": "TCP-UDP setup",
+  "version": 0,
+  "description": "IC 41 - TCP-UDP setup (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.41",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the TCP-UDP setup object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "TCP_UDP_remote_address",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": true },
+      "description": "Remote TCP/UDP address (IPv4 or IPv6).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "TCP_UDP_remote_port",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Remote TCP/UDP port number.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "TCP_UDP_local_port",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Local TCP/UDP port number.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "IP_reference",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Reference to the IP setup object (logical name).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "MSS",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Maximum Segment Size for TCP.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 7,
+      "name": "nb_of_sim_conn",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Number of simultaneous connections.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 8,
+      "name": "inactivity_time_out",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Inactivity timeout in seconds.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 9,
+      "name": "keep_alive_time",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Keep-alive time in seconds.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 10,
+      "name": "DSCP",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Differentiated Services Code Point.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 11,
+      "name": "flow_control",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Flow control configuration.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 12,
+      "name": "link_layer_security",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Link layer security configuration.",
+      "mandatory": false
+    },
+    {
+      "attribute_id": 13,
+      "name": "NAT_translation",
+      "data_type": "boolean",
+      "access_rights": { "get": true, "set": true },
+      "description": "Enable/disable NAT translation.",
+      "mandatory": false
+    }
+  ],
+  "methods": []
+}

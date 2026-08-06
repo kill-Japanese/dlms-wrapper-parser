@@ -1,0 +1,113 @@
+{
+  "class_id": 8,
+  "class_name": "Clock",
+  "version": 0,
+  "description": "IC 8 - Clock (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.8",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the clock object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "time",
+      "data_type": "octet_string[12]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Current date and time (date-time format, 12 bytes).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "time_zone",
+      "data_type": "long",
+      "access_rights": { "get": true, "set": true },
+      "description": "Time zone offset in minutes from UTC.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "status",
+      "data_type": "unsigned",
+      "access_rights": { "get": true, "set": true },
+      "description": "Clock status (e.g. daylight saving active, clock value valid).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "daylight_saving_begin",
+      "data_type": "octet_string[12]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Date and time when daylight saving time begins.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "daylight_saving_end",
+      "data_type": "octet_string[12]",
+      "access_rights": { "get": true, "set": true },
+      "description": "Date and time when daylight saving time ends.",
+      "mandatory": true
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "adjust_to_quarter",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Adjust the clock to the nearest quarter hour."
+    },
+    {
+      "method_id": 2,
+      "name": "adjust_to_minute",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Adjust the clock to the nearest minute."
+    },
+    {
+      "method_id": 3,
+      "name": "adjust_to_preset_time",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Adjust the clock to a preset time value."
+    },
+    {
+      "method_id": 4,
+      "name": "shift_time",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "time_shift", "type": "long", "description": "Time shift value in seconds" }
+      ],
+      "return_type": "void",
+      "description": "Shift the clock time by a given number of seconds."
+    },
+    {
+      "method_id": 5,
+      "name": "set_daylight_saving_begin_end",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "begin", "type": "octet_string[12]", "description": "Daylight saving begin date-time" },
+        { "name": "end", "type": "octet_string[12]", "description": "Daylight saving end date-time" }
+      ],
+      "return_type": "void",
+      "description": "Set the daylight saving begin and end dates."
+    },
+    {
+      "method_id": 6,
+      "name": "current_time",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "octet_string[12]",
+      "description": "Get the current time from the clock."
+    }
+  ]
+}

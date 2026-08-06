@@ -1,0 +1,35 @@
+{
+  "class_id": 3,
+  "class_name": "Register",
+  "version": 0,
+  "description": "IC 3 - Register (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.3",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the register object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "value",
+      "data_type": "Long",
+      "access_rights": { "get": true, "set": false },
+      "description": "Current value of the register (scaled by scaler_unit).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "scaler_unit",
+      "data_type": "octet_string[2]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Scaler and unit of the register value. First byte is the scaler (signed), second byte is the unit.",
+      "mandatory": true
+    }
+  ],
+  "methods": []
+}

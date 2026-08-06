@@ -66,16 +66,17 @@ export const getCurrentBaseURL = () => {
   return api.defaults.baseURL
 }
 
-// 构建健康检查 URL（健康检查在根路径，不在 /api 下）
+// 构建健康检查 URL（后端同时支持 /health 和 /api/health）
+// 使用 /api/health 确保在 Vite 代理模式下也能正常工作
 const getHealthCheckURL = () => {
   const base = api.defaults.baseURL
-  // 如果 baseURL 以 /api 结尾，替换成 /health
+  // 如果 baseURL 以 /api 结尾，加 /health
   if (base.endsWith('/api')) {
-    return base.slice(0, -4) + '/health'
+    return base + '/health'
   }
-  // 如果是相对路径 /api，替换成 /health
+  // 如果是相对路径 /api，返回 /api/health
   if (base === '/api') {
-    return '/health'
+    return '/api/health'
   }
   // 否则直接在末尾加 /health
   return base.replace(/\/+$/, '') + '/health'

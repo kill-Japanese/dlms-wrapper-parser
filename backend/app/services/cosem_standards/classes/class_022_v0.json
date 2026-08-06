@@ -1,0 +1,100 @@
+{
+  "class_id": 22,
+  "class_name": "Activity calendar",
+  "version": 0,
+  "description": "IC 22 - Activity calendar (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.22",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the activity calendar object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "calendar_name",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": true },
+      "description": "Name of the calendar.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "season_profile",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "season_name", "type": "octet_string", "description": "Season name" },
+        { "name": "season_start", "type": "octet_string[12]", "description": "Season start date-time" },
+        { "name": "week_profile_name", "type": "octet_string", "description": "Reference to week profile" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Season profile defining the periods of the year.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "week_profile_table",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "week_profile_name", "type": "octet_string", "description": "Week profile name" },
+        { "name": "monday", "type": "octet_string", "description": "Day profile for Monday" },
+        { "name": "tuesday", "type": "octet_string", "description": "Day profile for Tuesday" },
+        { "name": "wednesday", "type": "octet_string", "description": "Day profile for Wednesday" },
+        { "name": "thursday", "type": "octet_string", "description": "Day profile for Thursday" },
+        { "name": "friday", "type": "octet_string", "description": "Day profile for Friday" },
+        { "name": "saturday", "type": "octet_string", "description": "Day profile for Saturday" },
+        { "name": "sunday", "type": "octet_string", "description": "Day profile for Sunday" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Week profile table mapping week profiles to day profiles.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "day_profile_table",
+      "data_type": "array",
+      "element_type": "structure",
+      "element_structure": [
+        { "name": "day_id", "type": "unsigned", "description": "Day profile identifier" },
+        { "name": "day_schedule", "type": "array", "description": "Array of schedule entries (start_time + activity_script)" }
+      ],
+      "access_rights": { "get": true, "set": true },
+      "description": "Day profile table containing daily activity schedules.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "activity_calendar_name",
+      "data_type": "octet_string",
+      "access_rights": { "get": true, "set": false },
+      "description": "Name of the currently active activity calendar.",
+      "mandatory": true
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "activate_profile",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "calendar_name", "type": "octet_string", "description": "Calendar name to activate" }
+      ],
+      "return_type": "void",
+      "description": "Activate the specified calendar profile."
+    },
+    {
+      "method_id": 2,
+      "name": "passive_calendar",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "octet_string",
+      "description": "Get the name of the passive (inactive) calendar."
+    }
+  ]
+}

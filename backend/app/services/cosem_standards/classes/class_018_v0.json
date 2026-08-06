@@ -1,0 +1,134 @@
+{
+  "class_id": 18,
+  "class_name": "Image transfer",
+  "version": 0,
+  "description": "IC 18 - Image transfer (v0)",
+  "source": "Blue Book Ed.17 Part 2",
+  "source_section": "6.18",
+  "attributes": [
+    {
+      "attribute_id": 1,
+      "name": "logical_name",
+      "data_type": "octet_string[6]",
+      "access_rights": { "get": true, "set": false },
+      "description": "Logical name of the image transfer object",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 2,
+      "name": "image_block_size",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Size of each image block in bytes.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 3,
+      "name": "image_transferred_blocks_status",
+      "data_type": "bit_string",
+      "access_rights": { "get": true, "set": false },
+      "description": "Bitmap indicating which blocks have been successfully transferred.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 4,
+      "name": "image_first_not_transferred_block_number",
+      "data_type": "long-unsigned",
+      "access_rights": { "get": true, "set": false },
+      "description": "Block number of the first block that has not yet been transferred.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 5,
+      "name": "image_transfer_enabled",
+      "data_type": "boolean",
+      "access_rights": { "get": true, "set": true },
+      "description": "Flag indicating whether image transfer is enabled.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 6,
+      "name": "image_transfer_status",
+      "data_type": "enum",
+      "enum_values": {
+        "0": "image_transfer_not_initiated",
+        "1": "image_transfer_initiated",
+        "2": "image_verification_initiated",
+        "3": "image_verification_success",
+        "4": "image_verification_failed",
+        "5": "image_activation_initiated",
+        "6": "image_activation_success",
+        "7": "image_activation_failed"
+      },
+      "access_rights": { "get": true, "set": false },
+      "description": "Current status of the image transfer process.",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 7,
+      "name": "image_to_activate_info",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": false },
+      "description": "Information about the image to be activated (identifier, signature, etc.).",
+      "mandatory": true
+    },
+    {
+      "attribute_id": 8,
+      "name": "image_activated_info",
+      "data_type": "structure",
+      "access_rights": { "get": true, "set": false },
+      "description": "Information about the currently activated image.",
+      "mandatory": true
+    }
+  ],
+  "methods": [
+    {
+      "method_id": 1,
+      "name": "image_transfer_initiate",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "image_size", "type": "long-unsigned", "description": "Total size of the image in bytes" },
+        { "name": "image_info", "type": "structure", "description": "Image identification information" }
+      ],
+      "return_type": "void",
+      "description": "Initiate a new image transfer session."
+    },
+    {
+      "method_id": 2,
+      "name": "image_block_transfer",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "block_number", "type": "long-unsigned", "description": "Block number" },
+        { "name": "block_data", "type": "octet_string", "description": "Block data content" }
+      ],
+      "return_type": "void",
+      "description": "Transfer a single block of the image."
+    },
+    {
+      "method_id": 3,
+      "name": "image_verify",
+      "access_rights": { "action": true },
+      "parameters": [
+        { "name": "verification_data", "type": "octet_string", "description": "Verification data (e.g. checksum)" }
+      ],
+      "return_type": "void",
+      "description": "Verify the integrity of the transferred image."
+    },
+    {
+      "method_id": 4,
+      "name": "image_activate",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Activate the verified image (firmware upgrade)."
+    },
+    {
+      "method_id": 5,
+      "name": "image_activate_on_power_up",
+      "access_rights": { "action": true },
+      "parameters": [],
+      "return_type": "void",
+      "description": "Schedule image activation on the next power-up."
+    }
+  ]
+}
