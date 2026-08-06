@@ -1,18 +1,21 @@
 """
 DLMS Wrapper Parser - FastAPI 主入口
 """
+import os
 import asyncio
 import uuid
 import traceback
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 
 from app.config import settings
-from app.routers import parse, datamodel, stream, auto, pull, standards, profile_capture
+from app.routers import parse, datamodel, stream, auto, pull, standards, profile_capture, nb_device
 from app.services.tcp_server import tcp_server
 from app.services.auto_handler import auto_handler
 from app.services.log_manager import log_manager
@@ -55,10 +58,23 @@ ws_manager = WebSocketManager()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理 - 启动时初始化TCP服务器（可选）"""
-    # 启动时：可选启动TCP服务器
+    # 启动时：初始化WebSocket和自动处理模块
     tcp_server.set_ws_manager(ws_manager)
     auto_handler.set_tcp_server(tcp_server)
-    # 默认不自动启动TCP服务器，由API控制
+
+    # 如果设置了 TCP_AUTOSTART=true，则自动启动 TCP 服务器
+    # 用于 Docker/VPS 部署场景，NB 设备通过公网 TCP 接入
+    autostart = os.getenv("TCP_AUTOSTART", "false").lower() in ("true", "1", "yes")
+    if autostart:
+        try:
+            result = await tcp_server.start()
+            if result.get("success"):
+                print(f"[TCP] 服务器已自动启动: {result.get('host')}:{result.get('port')} ({result.get('protocol', 'tcp').upper()})")
+            else:
+                print(f"[TCP] 自动启动失败: {result.get('message')}")
+        except Exception as e:
+            print(f"[TCP] 自动启动异常: {e}")
+
     yield
     # 关闭时：停止TCP服务器
     if tcp_server.running:
@@ -123,6 +139,7 @@ app.include_router(auto.router)
 app.include_router(pull.router)
 app.include_router(standards.router)
 app.include_router(profile_capture.router)
+app.include_router(nb_device.router)
 
 
 @app.get("/health", summary="健康检查")
@@ -200,6 +217,35 @@ async def global_exception_handler(request: Request, exc: Exception):
     else:
         response.headers["Access-Control-Allow-Origin"] = "*"
     return response
+
+
+# ============================================================
+# 前端静态文件服务 (Docker 部署时由同一服务提供前后端)
+# ============================================================
+# 当 backend/app/static 目录存在时（Docker 构建时将前端 dist 复制到此），
+# 后端会同时提供 API 服务和前端静态文件，实现单端口访问。
+_frontend_dir = Path(__file__).parent / "static"
+if _frontend_dir.exists() and (_frontend_dir / "index.html").exists():
+    # 挂载 Vite 构建的 assets 目录（js/css/图片等带 hash 的资源）
+    _assets_dir = _frontend_dir / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="frontend-assets")
+
+    # SPA 回退：所有未匹配 API 路由的 GET 请求返回对应静态文件或 index.html
+    # 注意：此路由注册在所有 API 路由之后，不影响 /api/*、/health、/docs、/ws 等
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_frontend(full_path: str):
+        # 防止路径穿越攻击
+        resolved = (_frontend_dir / full_path).resolve()
+        try:
+            resolved.relative_to(_frontend_dir.resolve())
+        except ValueError:
+            return FileResponse(str(_frontend_dir / "index.html"))
+
+        if full_path and resolved.is_file():
+            return FileResponse(str(resolved))
+        # SPA 路由回退：返回 index.html 让前端路由处理
+        return FileResponse(str(_frontend_dir / "index.html"))
 
 
 if __name__ == "__main__":

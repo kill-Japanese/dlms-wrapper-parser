@@ -1,0 +1,55 @@
+# ============================================================
+# DLMS Wrapper Parser - Docker Compose 部署配置
+# 用于 VPS 部署，支持 NB 设备通过公网 TCP 接入
+# ============================================================
+# 使用方法：
+#   构建并启动：  docker compose up -d --build
+#   查看日志：    docker compose logs -f
+#   停止服务：    docker compose down
+#   重启服务：    docker compose restart
+# ============================================================
+
+services:
+  dlms-parser:
+    # 使用当前目录的 Dockerfile 构建
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # 镜像名称
+    image: dlms-wrapper-parser:latest
+    # 容器名称
+    container_name: dlms-parser
+    # 重启策略：除非手动停止，否则总是重启
+    restart: unless-stopped
+    # 端口映射：
+    #   8000 - HTTP API + 前端 Web 界面
+    #   4059 - TCP 端口，供 NB 设备通过公网接入
+    ports:
+      - "8000:8000"
+      - "4059:4059"
+    # 环境变量
+    environment:
+      - TCP_HOST=0.0.0.0
+      - TCP_PORT=4059
+      - TCP_AUTOSTART=true
+      - CORS_ORIGINS=*
+      - LOG_LEVEL=INFO
+      - HOST=0.0.0.0
+      - PORT=8000
+    # 数据卷：持久化 capture objects 配置
+    # 容器内路径对应 backend/app/services/data 目录
+    volumes:
+      - ./data:/app/backend/app/services/data
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    # 日志配置
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
