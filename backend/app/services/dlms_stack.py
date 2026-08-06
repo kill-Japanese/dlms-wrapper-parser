@@ -380,6 +380,13 @@ def parse_frame(
                     # 从 APDU 解析结果中获取 push_object_list
                     apdu_dict = result.apdu if isinstance(result.apdu, dict) else {}
                     push_object_list = apdu_dict.get('push_object_list', [])
+                    has_class40_template = apdu_dict.get('has_class40_template', False)
+
+                    # 当存在 Class 40 模版时，push_object_list 的第一个条目是
+                    # Class 40 自身（push setup 的属性2），它在 notification_items
+                    # 中没有对应的值。必须跳过它，否则所有项会错位一位。
+                    if has_class40_template and len(push_object_list) > 0:
+                        push_object_list = push_object_list[1:]
 
                     if push_object_list:
                         # 构造 notification_items

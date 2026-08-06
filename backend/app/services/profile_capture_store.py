@@ -147,9 +147,30 @@ class ProfileCaptureStore:
         except IOError:
             pass
 
+    @staticmethod
+    def _normalize_obis_key(obis: str) -> str:
+        """将 OBIS 字符串标准化为统一格式 (A-B:C.D.E.F) 用于比较
+
+        处理不同格式:
+        - "1-0:1.8.0.255" (标准)
+        - "1.0.1.8.0.255" (点分隔)
+        - "1-0:1.8.0*255" (星号分隔)
+        - "0100010800FF"  (十六进制)
+        """
+        if not obis:
+            return ""
+        try:
+            from app.utils.obis_utils import normalize_obis
+            parts = normalize_obis(obis)
+            return f"{parts[0]}-{parts[1]}:{parts[2]}.{parts[3]}.{parts[4]}.{parts[5]}"
+        except Exception:
+            return obis.strip().lower()
+
     def get_config(self, profile_obis: str) -> Optional[ProfileCaptureConfig]:
         """
         获取指定 Profile 的 capture_objects 配置
+        
+        支持模糊匹配：先精确匹配，再尝试标准化后的 OBIS 匹配。
         
         Args:
             profile_obis: Profile Generic 对象的 OBIS
@@ -157,7 +178,15 @@ class ProfileCaptureStore:
         Returns:
             配置对象，不存在返回 None
         """
+        # 精确匹配
         config = self._configs.get(profile_obis)
+        if not config:
+            # 标准化模糊匹配
+            norm_key = self._normalize_obis_key(profile_obis)
+            for stored_obis, stored_config in self._configs.items():
+                if self._normalize_obis_key(stored_obis) == norm_key:
+                    config = stored_config
+                    break
         if config:
             # 更新使用次数
             config.used_count += 1
@@ -288,8 +317,14 @@ class ProfileCaptureStore:
         }
 
     def has_config(self, profile_obis: str) -> bool:
-        """检查是否有指定 Profile 的配置"""
-        return profile_obis in self._configs
+        """检查是否有指定 Profile 的配置（支持模糊匹配）"""
+        if profile_obis in self._configs:
+            return True
+        norm_key = self._normalize_obis_key(profile_obis)
+        for stored_obis in self._configs:
+            if self._normalize_obis_key(stored_obis) == norm_key:
+                return True
+        return False
 
     def clear_all(self):
         """清空所有配置（慎用）"""

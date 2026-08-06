@@ -588,28 +588,41 @@ function APDULayer({ data, pushResolved }) {
                 onConfigure={openEditor}
               />
             ))}
-          {/* 普通对象增强展示 */}
+          {/* 普通对象 + capture_objects 增强展示 */}
           {pushResolved.resolved_items
-            .filter(item => item.type === 'normal_object' && item.push_object)
+            .filter(item => (item.type === 'normal_object' || item.type === 'capture_objects') && item.push_object)
             .length > 0 && (
             <Card size="small" style={{ marginBottom: 12 }}>
               <Space direction="vertical" size="small" style={{ width: '100%' }}>
                 <Text strong>推送对象增强信息</Text>
                 {pushResolved.resolved_items
-                  .filter(item => item.type === 'normal_object' && item.push_object)
+                  .filter(item => (item.type === 'normal_object' || item.type === 'capture_objects') && item.push_object)
                   .map((item, idx) => {
                     const po = item.push_object
                     const enh = item.enhanced || {}
                     return (
-                      <Space key={idx} size="small">
-                        <Tag color="blue">{po.class_id}</Tag>
-                        <Text type="secondary" style={{ fontSize: 11 }}>{po.class_name}</Text>
-                        <Text code style={{ fontSize: 11 }}>{po.obis}</Text>
-                        <Tag>A{po.attribute_id}</Tag>
-                        <Text type="secondary" style={{ fontSize: 11 }}>{po.attribute_name}</Text>
-                        <Text code>{enh.formatted_value || item.raw_value}</Text>
-                        {enh.unit && <Tag color="cyan">{enh.unit}</Tag>}
-                      </Space>
+                      <div key={idx}>
+                        <Space size="small" wrap>
+                          <Tag color="blue">{po.class_id}</Tag>
+                          <Text type="secondary" style={{ fontSize: 11 }}>{po.class_name}</Text>
+                          <Text code style={{ fontSize: 11 }}>{po.obis}</Text>
+                          <Tag>A{po.attribute_id}</Tag>
+                          <Text type="secondary" style={{ fontSize: 11 }}>{po.attribute_name}</Text>
+                          <Text code>{enh.formatted_value || item.raw_value}</Text>
+                          {enh.unit && <Tag color="cyan">{enh.unit}</Tag>}
+                        </Space>
+                        {item.type === 'capture_objects' && enh.capture_object_summary && enh.capture_object_summary.length > 0 && (
+                          <div style={{ marginLeft: 16, marginTop: 4 }}>
+                            {enh.capture_object_summary.map((co, ci) => (
+                              <Space key={ci} size="small" style={{ fontSize: 11, marginRight: 12 }}>
+                                <Tag style={{ fontSize: 10 }}>C{co.class_id}</Tag>
+                                <Text code style={{ fontSize: 10 }}>{co.obis}</Text>
+                                <Text type="secondary" style={{ fontSize: 10 }}>A{co.attribute_id}</Text>
+                              </Space>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )
                   })}
               </Space>

@@ -88,10 +88,20 @@ class PushDataResolver:
                              push_object_list: List[dict],
                              data_model, standards_manager,
                              profile_capture_store, warnings: List[str]) -> dict:
-        """解析单个推送项"""
+        """解析单个推送项
+
+        优先使用 item 自身的 class_id/obis/attribute_id（来自 APDU 解析的描述符），
+        因为这些是数据中实际携带的描述符，最可靠。
+        push_object_list 仅用于补充 data_index 等额外信息。
+        """
         # 获取原始值
         raw_value = item.get("value") if isinstance(item, dict) else item
         raw_type = item.get("type", "") if isinstance(item, dict) else ""
+
+        # item 自身的描述符（来自 APDU 解析的 CosemAttributeDescriptor）
+        item_class_id = item.get("class_id", 0) if isinstance(item, dict) else 0
+        item_obis = item.get("obis", "") if isinstance(item, dict) else ""
+        item_attr_id = item.get("attribute_id", 0) if isinstance(item, dict) else 0
 
         result = {
             "index": index,
@@ -99,21 +109,38 @@ class PushDataResolver:
             "raw_type": raw_type,
         }
 
-        # 获取对应的 push object 定义
-        if index >= len(push_object_list):
+        # 获取 push_object_list 中的定义（用于补充 data_index）
+        push_obj = None
+        data_index = 0
+        if index < len(push_object_list):
+            push_obj = push_object_list[index]
+            data_index = push_obj.get("data_index", push_obj.get("dataIndex", 0))
+
+        # 优先使用 item 自身的描述符；如果 item 没有描述符，则回退到 push_object_list
+        if item_class_id and item_class_id > 0:
+            class_id = item_class_id
+            instance_id = item_obis
+            attribute_id = item_attr_id
+        elif push_obj:
+            class_id = push_obj.get("class_id", push_obj.get("classId", 0))
+            instance_id = push_obj.get("instance_id", push_obj.get("obis", ""))
+            attribute_id = push_obj.get("attribute_id", push_obj.get("attrId", 0))
+        else:
             result["push_object"] = None
             result["type"] = "unknown"
             result["warning"] = f"No push object definition for item {index}"
             warnings.append(f"Item {index}: no push object definition")
             return result
 
-        push_obj = push_object_list[index]
-
-        # 标准化 push_obj 格式
-        class_id = push_obj.get("class_id", push_obj.get("classId", 0))
-        instance_id = push_obj.get("instance_id", push_obj.get("obis", ""))
-        attribute_id = push_obj.get("attribute_id", push_obj.get("attrId", 0))
-        data_index = push_obj.get("data_index", push_obj.get("dataIndex", 0))
+        # 交叉校验：如果 item 和 push_object_list 都有 class_id 但不一致，记录警告
+        if push_obj and item_class_id and item_class_id > 0:
+            pol_class_id = push_obj.get("class_id", push_obj.get("classId", 0))
+            if pol_class_id and pol_class_id != item_class_id:
+                warnings.append(
+                    f"Item {index}: descriptor mismatch - "
+                    f"item has class={item_class_id} obis={item_obis} attr={item_attr_id}, "
+                    f"but push_object_list has class={pol_class_id}"
+                )
 
         # 获取 Class 名称和属性名称
         class_name = PushDataResolver._get_class_name(class_id, standards_manager)
@@ -132,11 +159,17 @@ class PushDataResolver:
 
         # 根据不同类型进行深度解析
         if class_id == 7 and attribute_id == 2:
-            # Profile Generic buffer - 深度解析
+            # Profile Generic buffer (attr 2) - 深度解析
             result["type"] = "profile_buffer"
             result["profile_buffer"] = PushDataResolver._resolve_profile_buffer(
                 raw_value, class_id, instance_id, attribute_id, data_index,
                 data_model, standards_manager, profile_capture_store, warnings
+            )
+        elif class_id == 7 and attribute_id == 3:
+            # Profile Generic capture_objects (attr 3) - 展示捕获对象定义
+            result["type"] = "capture_objects"
+            result["enhanced"] = PushDataResolver._enhance_capture_objects(
+                raw_value, instance_id, data_model, standards_manager, warnings
             )
         else:
             # 普通对象 - 增强显示信息
@@ -209,6 +242,12 @@ class PushDataResolver:
             return result
 
         cap_objs = capture_result["objects"]
+
+        # 检查 buffer_value 是否有效
+        if buffer_value is None:
+            result["warning"] = "Buffer value is null (no data in profile buffer)"
+            warnings.append(f"Profile {obis}: buffer value is null")
+            return result
 
         # 规范化 buffer_value 为 entries 列表
         # buffer_value 可能是:
@@ -426,6 +465,63 @@ class PushDataResolver:
                 except Exception:
                     pass
 
+        return result
+
+    @staticmethod
+    def _enhance_capture_objects(value, profile_obis: str,
+                                 data_model, standards_manager,
+                                 warnings: List[str]) -> dict:
+        """增强 Profile Generic capture_objects (attr 3) 的显示
+
+        capture_objects 是一个 array of structure，每个 structure 定义了
+        一个被捕获的对象: [class_id, obis, attribute_id, data_index]
+        """
+        result = {
+            "value": value,
+            "formatted_value": "",
+            "capture_object_count": 0,
+            "capture_object_summary": [],
+        }
+
+        if not isinstance(value, list):
+            result["formatted_value"] = str(value)
+            return result
+
+        result["capture_object_count"] = len(value)
+
+        summaries = []
+        for elem in value:
+            if isinstance(elem, list) and len(elem) >= 3:
+                cap_class = elem[0]
+                cap_obis_bytes = elem[1] if isinstance(elem[1], (bytes, bytearray)) else b""
+                cap_attr = elem[2]
+                cap_data_idx = elem[3] if len(elem) > 3 else 0
+
+                # 转换 OBIS
+                cap_obis = ""
+                if isinstance(cap_obis_bytes, (bytes, bytearray)) and len(cap_obis_bytes) == 6:
+                    try:
+                        from app.utils.obis_utils import obis_bytes_to_str
+                        cap_obis = obis_bytes_to_str(bytes(cap_obis_bytes))
+                    except Exception:
+                        cap_obis = cap_obis_bytes.hex()
+
+                cap_class_name = PushDataResolver._get_class_name(cap_class, standards_manager)
+                cap_attr_name = PushDataResolver._get_attribute_name(
+                    cap_class, cap_attr, standards_manager
+                )
+
+                summaries.append({
+                    "class_id": cap_class,
+                    "class_name": cap_class_name,
+                    "obis": cap_obis,
+                    "attribute_id": cap_attr,
+                    "attribute_name": cap_attr_name,
+                    "data_index": cap_data_idx,
+                })
+
+        result["capture_object_summary"] = summaries
+        result["formatted_value"] = f"[{len(value)} capture objects]"
         return result
 
     @staticmethod
