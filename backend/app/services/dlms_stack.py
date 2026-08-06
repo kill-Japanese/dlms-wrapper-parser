@@ -31,6 +31,7 @@ from app.services.compression import decompress, compress, V44_AVAILABLE
 from app.services.apdu_parser import parse_apdu, build_apdu
 from app.services.datamodel import data_model_manager
 from app.services.log_manager import log_manager
+from app.utils.ber_encoder import decode_data, _decode_date_time
 
 
 def _convert_bytes_to_hex(obj):
@@ -51,6 +52,85 @@ def _convert_bytes_to_hex(obj):
     elif isinstance(obj, set):
         return {_convert_bytes_to_hex(item) for item in obj}
     return obj
+
+
+def _enhance_items_with_datamodel(items):
+    """
+    利用数据模型信息增强数据项：
+    1. 补充属性名称
+    2. 用数据模型中的数据类型覆盖（如果更准确）
+    3. 对于已知的特殊类型（如 date-time），进行值的转换
+    
+    Args:
+        items: CosemDataItem 列表
+        
+    Returns:
+        增强后的 items 列表
+    """
+    if not items or not data_model_manager.is_loaded:
+        return items
+    
+    for item in items:
+        try:
+            # 匹配数据模型
+            matched = data_model_manager.match_obis(
+                class_id=item.class_id,
+                obis_bytes=item.obis_bytes if item.obis_bytes else (hex_to_bytes(item.obis) if item.obis else b''),
+                attribute_id=item.attribute_id,
+            )
+            
+            if matched:
+                # 补充属性名称到 description
+                if matched.name and not item.description:
+                    item.description = matched.name
+                
+                # 如果数据模型中有更准确的数据类型
+                if matched.data_type:
+                    model_data_type = matched.data_type.lower().replace('_', '-').replace(' ', '-')
+                    
+                    # 处理 octet_string[N] 格式
+                    if 'octet-string' in model_data_type or 'octet_string' in model_data_type:
+                        # 检查是否是 date-time 类型（12 字节 octet-string 且是 Clock 的 time 属性）
+                        if item.class_id == 8 and item.attribute_id == 2:
+                            # Clock time 属性 - 尝试解析为 date-time
+                            try:
+                                if isinstance(item.value, str):
+                                    # 如果是字符串 hex
+                                    val_bytes = hex_to_bytes(item.value.replace('"', '').replace(' ', ''))
+                                elif isinstance(item.value, bytes):
+                                    val_bytes = item.value
+                                else:
+                                    val_bytes = None
+                                
+                                if val_bytes and len(val_bytes) == 12:
+                                    dt_dict = _decode_date_time(val_bytes, 12)
+                                    item.value = dt_dict
+                                    item.data_type = 'date-time'
+                                    item.type = 'date-time'
+                            except Exception:
+                                pass
+                        elif item.class_id == 8 and item.attribute_id in (5, 6):
+                            # Clock 的 daylight_savings_begin/end 也是 date-time
+                            try:
+                                if isinstance(item.value, str):
+                                    val_bytes = hex_to_bytes(item.value.replace('"', '').replace(' ', ''))
+                                elif isinstance(item.value, bytes):
+                                    val_bytes = item.value
+                                else:
+                                    val_bytes = None
+                                
+                                if val_bytes and len(val_bytes) == 12:
+                                    dt_dict = _decode_date_time(val_bytes, 12)
+                                    item.value = dt_dict
+                                    item.data_type = 'date-time'
+                                    item.type = 'date-time'
+                            except Exception:
+                                pass
+        except Exception:
+            # 单个项增强失败不影响其他项
+            continue
+    
+    return items
 
 
 def parse_frame(
@@ -265,6 +345,11 @@ def parse_frame(
         # Step 5: APDU解析
         try:
             apdu_obj = parse_apdu(payload)
+            
+            # 利用数据模型增强数据项（补充属性名、转换特殊类型如date-time等）
+            if hasattr(apdu_obj, 'items') and apdu_obj.items:
+                _enhance_items_with_datamodel(apdu_obj.items)
+            
             # 将 bytes 转为 hex 字符串，避免 JSON 序列化失败
             result.apdu = _convert_bytes_to_hex(apdu_obj.model_dump())
             log_manager.info(
