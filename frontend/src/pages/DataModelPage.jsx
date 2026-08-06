@@ -634,7 +634,14 @@ function DataModelPage() {
                             }
                             description={
                               <Space direction="vertical" size={0}>
-                                <Text code>{item.obis}</Text>
+                                <Space size={4}>
+                                  <Text code>{item.obis}</Text>
+                                  {item.version !== undefined && item.version !== null && item.version !== '' && item.version !== 0 && (
+                                    <Tag color="gold" style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px', height: 16 }}>
+                                      v{item.version}
+                                    </Tag>
+                                  )}
+                                </Space>
                                 {item.description && (
                                   <Text type="secondary" ellipsis style={{ fontSize: 12 }}>
                                     {item.description}
@@ -694,13 +701,13 @@ function DataModelPage() {
                               <Text>{getClassName(selectedObjectDetail.class_id)}</Text>
                             </Space>
                           </Col>
-                          {selectedObjectDetail.version && (
+                          {selectedObjectDetail.version !== undefined && selectedObjectDetail.version !== null && selectedObjectDetail.version !== '' && (
                             <>
                               <Col span={12}>
                                 <Text type="secondary">版本:</Text>
                               </Col>
                               <Col span={12}>
-                                <Text>{selectedObjectDetail.version}</Text>
+                                <Tag color="gold">v{selectedObjectDetail.version}</Tag>
                               </Col>
                             </>
                           )}
