@@ -468,7 +468,12 @@ class APDUParser:
 
     @classmethod
     def _format_value_for_display(cls, value, data_type: str):
-        """格式化值以便显示"""
+        """格式化值以便显示
+
+        注意：list 类型保持原样不转换为字符串，以便 PushDataResolver
+        能够遍历 Profile buffer 等结构化数据进行深度解析。
+        前端已自行处理 list 的显示（显示元素个数）。
+        """
         if isinstance(value, bytes):
             if data_type == "octet-string" and len(value) <= 32:
                 try:
@@ -479,7 +484,8 @@ class APDUParser:
                     pass
             return value.hex()
         elif isinstance(value, list):
-            return f"[{len(value)} elements]"
+            # 保持 list 原样，不转为字符串，供 PushDataResolver 深度解析
+            return value
         elif value is None:
             return None
         return value

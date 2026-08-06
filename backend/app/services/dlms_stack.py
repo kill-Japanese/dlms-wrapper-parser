@@ -345,11 +345,11 @@ def parse_frame(
         # Step 5: APDU解析
         try:
             apdu_obj = parse_apdu(payload)
-            
+
             # 利用数据模型增强数据项（补充属性名、转换特殊类型如date-time等）
             if hasattr(apdu_obj, 'items') and apdu_obj.items:
                 _enhance_items_with_datamodel(apdu_obj.items)
-            
+
             # 将 bytes 转为 hex 字符串，避免 JSON 序列化失败
             result.apdu = _convert_bytes_to_hex(apdu_obj.model_dump())
             log_manager.info(
@@ -367,6 +367,59 @@ def parse_frame(
                     )
                     if matched:
                         result.matched_objects.append(matched.model_dump())
+
+            # Step 6: Push 数据深度解析（Profile buffer 逐元素解析等）
+            # 当 APDU 类型为 DataNotification 且包含 push_object_list 时，
+            # 使用 PushDataResolver 结合 Capture Objects 配置深度解析
+            if apdu_obj.type_name == 'DataNotification' and hasattr(apdu_obj, 'items') and apdu_obj.items:
+                try:
+                    from app.services.push_data_resolver import PushDataResolver
+                    from app.services.profile_capture_store import get_profile_capture_store
+                    from app.services.cosem_standards import get_standards_manager
+
+                    # 从 APDU 解析结果中获取 push_object_list
+                    apdu_dict = result.apdu if isinstance(result.apdu, dict) else {}
+                    push_object_list = apdu_dict.get('push_object_list', [])
+
+                    if push_object_list:
+                        # 构造 notification_items
+                        notification_items = []
+                        for item in apdu_obj.items:
+                            notification_items.append({
+                                'value': item.value,
+                                'type': item.data_type or item.type or '',
+                                'class_id': item.class_id,
+                                'obis': item.obis,
+                                'attribute_id': item.attribute_id,
+                            })
+
+                        # 获取依赖组件
+                        profile_capture_store = get_profile_capture_store()
+                        standards_manager = get_standards_manager()
+
+                        # 执行深度解析
+                        push_result = PushDataResolver.resolve_notification_items(
+                            notification_items=notification_items,
+                            push_object_list=push_object_list,
+                            data_model=data_model_manager if data_model_manager.is_loaded else None,
+                            standards_manager=standards_manager,
+                            profile_capture_store=profile_capture_store,
+                        )
+
+                        result.push_resolved = _convert_bytes_to_hex(push_result)
+
+                        profile_count = sum(
+                            1 for r in push_result.get('resolved_items', [])
+                            if r.get('type') == 'profile_buffer'
+                        )
+                        if profile_count > 0:
+                            log_manager.info(
+                                frame_id, "push_resolver",
+                                f"Push 深度解析完成: {profile_count} 个 Profile buffer 已解析"
+                            )
+                except Exception as e:
+                    log_manager.warn(frame_id, "push_resolver", f"Push 深度解析失败: {e}")
+
         except Exception as e:
             log_manager.error(frame_id, "apdu", f"APDU解析失败: {e}")
             result.errors.append(f"APDU解析失败: {e}")
