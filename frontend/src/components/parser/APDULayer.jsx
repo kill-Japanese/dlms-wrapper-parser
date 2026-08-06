@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table, Tooltip } from 'antd'
-=======
 import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table, Tooltip, Button, Alert } from 'antd'
->>>>>>> f27ec0e (feat: Profile Buffer 深度解析 + Capture Objects 配置 + COSEM 标准库)
 import {
   FileTextOutlined,
   DatabaseOutlined,
@@ -14,18 +10,12 @@ import {
   InfoCircleOutlined,
   BulbOutlined,
   ClockCircleOutlined,
-<<<<<<< HEAD
-  ProfileOutlined
-} from '@ant-design/icons'
-import { useState, useMemo } from 'react'
-=======
   ProfileOutlined,
   EditOutlined
 } from '@ant-design/icons'
 import { useState, useMemo, useCallback } from 'react'
 import ProfileBufferTable from './ProfileBufferTable.jsx'
 import CaptureObjectsEditor from './CaptureObjectsEditor.jsx'
->>>>>>> f27ec0e (feat: Profile Buffer 深度解析 + Capture Objects 配置 + COSEM 标准库)
 
 const { Text } = Typography
 const { Option } = Select
@@ -378,11 +368,7 @@ function convertNestedToTreeData(items, parentKey) {
   })
 }
 
-<<<<<<< HEAD
-function APDULayer({ data, dataModel }) {
-=======
 function APDULayer({ data, pushResolved }) {
->>>>>>> f27ec0e (feat: Profile Buffer 深度解析 + Capture Objects 配置 + COSEM 标准库)
   const [selectedVersion, setSelectedVersion] = useState(null)
   const [autoDetect, setAutoDetect] = useState(true)
   const [editorVisible, setEditorVisible] = useState(false)

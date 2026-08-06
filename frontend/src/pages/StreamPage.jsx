@@ -36,7 +36,11 @@ import {
   ReloadOutlined,
   SaveOutlined,
   CheckOutlined,
-  CloseOutlined
+  CloseOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  TableOutlined,
+  ProfileOutlined
 } from '@ant-design/icons'
 import useStreamStore from '../store/streamStore.js'
 import {
@@ -50,6 +54,11 @@ import {
   renameDevice,
   sendTcpData
 } from '../services/streamApi.js'
+import {
+  getProfileCaptureList,
+  deleteProfileCapture
+} from '../services/profileCapture.js'
+import CaptureObjectsEditor from '../components/parser/CaptureObjectsEditor.jsx'
 
 const { Title, Text } = Typography
 const { TextArea } = Input
@@ -83,11 +92,75 @@ function StreamPage() {
   const [configSaving, setConfigSaving] = useState(false)
   const [loadingDevices, setLoadingDevices] = useState(false)
 
+  // Capture Objects 管理状态
+  const [activeTab, setActiveTab] = useState('tcp')
+  const [captureProfiles, setCaptureProfiles] = useState([])
+  const [loadingProfiles, setLoadingProfiles] = useState(false)
+  const [editorVisible, setEditorVisible] = useState(false)
+  const [editorObis, setEditorObis] = useState('')
+  const [addProfileModalVisible, setAddProfileModalVisible] = useState(false)
+  const [newProfileObis, setNewProfileObis] = useState('')
+
   // 初始化：加载配置和状态
   useEffect(() => {
     loadTcpStatus()
     loadTcpConfigFromServer()
   }, [])
+
+  // 加载 Capture Objects 配置列表
+  const loadCaptureProfiles = async () => {
+    setLoadingProfiles(true)
+    try {
+      const result = await getProfileCaptureList()
+      setCaptureProfiles(Array.isArray(result) ? result : [])
+    } catch (e) {
+      console.log('获取Capture Objects列表失败:', e.message)
+      setCaptureProfiles([])
+    } finally {
+      setLoadingProfiles(false)
+    }
+  }
+
+  // 切换到 Capture Objects 标签时加载数据
+  useEffect(() => {
+    if (activeTab === 'capture') {
+      loadCaptureProfiles()
+    }
+  }, [activeTab])
+
+  // 打开编辑器
+  const handleOpenEditor = (obis) => {
+    setEditorObis(obis)
+    setEditorVisible(true)
+  }
+
+  // 编辑器保存成功后刷新列表
+  const handleEditorSuccess = () => {
+    loadCaptureProfiles()
+  }
+
+  // 删除配置
+  const handleDeleteProfile = async (obis) => {
+    try {
+      await deleteProfileCapture(obis)
+      message.success(`已删除 ${obis} 的配置`)
+      loadCaptureProfiles()
+    } catch (e) {
+      message.error(`删除失败: ${e.message}`)
+    }
+  }
+
+  // 添加新 Profile
+  const handleAddProfile = () => {
+    const obis = newProfileObis.trim()
+    if (!obis) {
+      message.warning('请输入 Profile OBIS')
+      return
+    }
+    setAddProfileModalVisible(false)
+    setNewProfileObis('')
+    handleOpenEditor(obis)
+  }
 
   // 加载 TCP 状态
   const loadTcpStatus = async () => {
@@ -329,6 +402,19 @@ function StreamPage() {
 
   return (
     <div className="page-container">
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'tcp',
+            label: (
+              <Space>
+                <ThunderboltOutlined />
+                <span>TCP 管理</span>
+              </Space>
+            ),
+            children: (
       <Card
         style={{ height: '100%' }}
         bodyStyle={{ height: 'calc(100% - 57px)', padding: 0 }}
@@ -667,6 +753,124 @@ function StreamPage() {
           </Col>
         </Row>
       </Card>
+            ),
+          },
+          {
+            key: 'capture',
+            label: (
+              <Space>
+                <TableOutlined />
+                <span>Capture Objects 配置</span>
+              </Space>
+            ),
+            children: (
+              <Card
+                title={
+                  <Space>
+                    <ProfileOutlined />
+                    <Title level={5} style={{ margin: 0 }}>
+                      Profile Capture Objects 管理
+                    </Title>
+                  </Space>
+                }
+                extra={
+                  <Space>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      onClick={loadCaptureProfiles}
+                      loading={loadingProfiles}
+                    >
+                      刷新
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<PlusOutlined />}
+                      onClick={() => setAddProfileModalVisible(true)}
+                    >
+                      添加 Profile
+                    </Button>
+                  </Space>
+                }
+              >
+                <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+                  配置 Profile Generic (Class 7) 的 capture_objects (属性3)。
+                  配置保存后，解析 DataNotification 时将自动使用此配置深度解析 Profile buffer 中的每个元素。
+                </Text>
+
+                {captureProfiles.length > 0 ? (
+                  <List
+                    loading={loadingProfiles}
+                    dataSource={captureProfiles}
+                    renderItem={(item) => (
+                      <List.Item
+                        actions={[
+                          <Button
+                            key="edit"
+                            size="small"
+                            type="primary"
+                            icon={<EditOutlined />}
+                            onClick={() => handleOpenEditor(item.profile_obis)}
+                          >
+                            编辑
+                          </Button>,
+                          <Popconfirm
+                            key="delete"
+                            title="确认删除？"
+                            description={`删除 ${item.profile_obis} 的配置`}
+                            onConfirm={() => handleDeleteProfile(item.profile_obis)}
+                            okText="删除"
+                            cancelText="取消"
+                            okButtonProps={{ danger: true }}
+                          >
+                            <Button size="small" danger icon={<DeleteOutlined />}>
+                              删除
+                            </Button>
+                          </Popconfirm>
+                        ]}
+                      >
+                        <List.Item.Meta
+                          avatar={<TableOutlined style={{ fontSize: 24, color: '#1677ff' }} />}
+                          title={
+                            <Space>
+                              <Text code>{item.profile_obis}</Text>
+                              {item.profile_name && (
+                                <Tag color="blue">{item.profile_name}</Tag>
+                              )}
+                              <Tag color="green">{item.capture_object_count} 个对象</Tag>
+                              <Tag>来源: {item.source}</Tag>
+                            </Space>
+                          }
+                          description={
+                            <Text type="secondary" style={{ fontSize: 12 }}>
+                              创建: {item.created_at ? new Date(item.created_at).toLocaleString('zh-CN') : '-'}
+                              {item.updated_at && ` | 更新: ${new Date(item.updated_at).toLocaleString('zh-CN')}`}
+                              {item.used_count > 0 && ` | 使用次数: ${item.used_count}`}
+                            </Text>
+                          }
+                        />
+                      </List.Item>
+                    )}
+                  />
+                ) : (
+                  <Empty
+                    description={loadingProfiles ? '加载中...' : '暂无配置，点击"添加 Profile"创建'}
+                    style={{ marginTop: 60 }}
+                  >
+                    <Button
+                      type="primary"
+                      icon={<PlusOutlined />}
+                      onClick={() => setAddProfileModalVisible(true)}
+                      style={{ marginTop: 16 }}
+                    >
+                      添加 Profile
+                    </Button>
+                  </Empty>
+                )}
+              </Card>
+            ),
+          },
+        ]}
+      />
 
       {/* 配置弹窗 */}
       <Modal
@@ -741,6 +945,39 @@ function StreamPage() {
             )}
           </Space>
         </Form>
+      </Modal>
+
+      {/* Capture Objects 编辑器弹窗 */}
+      <CaptureObjectsEditor
+        visible={editorVisible}
+        onClose={() => setEditorVisible(false)}
+        profileObis={editorObis}
+        onSuccess={handleEditorSuccess}
+      />
+
+      {/* 添加新 Profile 弹窗 */}
+      <Modal
+        title={
+          <Space>
+            <PlusOutlined />
+            <span>添加 Profile 配置</span>
+          </Space>
+        }
+        open={addProfileModalVisible}
+        onOk={handleAddProfile}
+        onCancel={() => setAddProfileModalVisible(false)}
+        okText="配置"
+        cancelText="取消"
+      >
+        <p style={{ marginBottom: 12 }}>
+          请输入 Profile Generic 的 OBIS 代码（例如：1-0:99.1.0.255）
+        </p>
+        <Input
+          value={newProfileObis}
+          onChange={(e) => setNewProfileObis(e.target.value)}
+          placeholder="1-0:99.1.0.255"
+          onPressEnter={handleAddProfile}
+        />
       </Modal>
     </div>
   )
