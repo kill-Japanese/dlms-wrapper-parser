@@ -31,7 +31,13 @@ export function buildFrame(apduType, params, options = {}) {
     src_wport: options.srcWPort || 1,
     dst_wport: options.dstWPort || 16,
     encrypt: options.encrypt || false,
+    compress: options.compress || false,
     key_id: options.keyId || 0
+  }
+
+  // 如果提供了原始APDU hex，则使用raw模式（跳过APDU构建）
+  if (options.rawApduHex) {
+    payload.raw_apdu_hex = options.rawApduHex
   }
 
   // 添加安全配置参数
@@ -49,6 +55,31 @@ export function buildFrame(apduType, params, options = {}) {
   }
 
   return api.post('/parse/build', payload)
+}
+
+// 打包原始APDU（V.44压缩 + AES-GCM加密 + general-glo-ciphering，可选Wrapper封装）
+export function packageApdu(apduHex, options = {}) {
+  const payload = {
+    apdu_hex: apduHex,
+    compress: options.compress ?? true,
+    encrypt: options.encrypt ?? true,
+    system_title: options.systemTitle || '',
+    invocation_counter: options.invocationCounter || 1,
+    key_id: options.keyId || 0,
+    with_wrapper: options.withWrapper ?? false,
+  }
+
+  // 仅在需要Wrapper时才发送WPort参数
+  if (options.withWrapper) {
+    payload.src_wport = options.srcWPort || 1
+    payload.dst_wport = options.dstWPort || 16
+  }
+
+  if (options.guek) payload.guek = options.guek
+  if (options.gubk) payload.gubk = options.gubk
+  if (options.ak) payload.ak = options.ak
+
+  return api.post('/pull/package-apdu', payload)
 }
 
 // 解析 DLMS Wrapper 数据（兼容旧接口）
@@ -117,6 +148,7 @@ export function clearLogs(type = 'all') {
 export default {
   parseHex,
   buildFrame,
+  packageApdu,
   parseWrapper,
   packWrapper,
   getParseHistory,

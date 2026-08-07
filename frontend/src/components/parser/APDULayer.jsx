@@ -1,4 +1,4 @@
-import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table, Tooltip, Button, Alert } from 'antd'
+import { Tree, Typography, Tag, Space, Empty, Select, Row, Col, Card, Table, Tooltip, Button, Alert, Descriptions, Statistic } from 'antd'
 import {
   FileTextOutlined,
   DatabaseOutlined,
@@ -368,6 +368,272 @@ function convertNestedToTreeData(items, parentKey) {
   })
 }
 
+// Pull 模式 APDU 子类型名称映射
+const GET_TYPE_NAMES = { 1: 'Normal', 2: 'Next', 3: 'With-List' }
+const SET_TYPE_NAMES = { 1: 'Normal', 2: 'With-First-Datablock', 3: 'With-Datablock', 4: 'With-List', 5: 'With-List-And-First-Datablock' }
+const ACTION_TYPE_NAMES = { 1: 'Normal', 2: 'With-PBlock', 3: 'With-List', 4: 'Next-PBlock' }
+
+// APDU tag -> type_name 映射（DLMS/IEC 62056-6 标准）
+// 优先于后端返回的 type_name，确保标签映射始终正确
+const APDU_TAG_TYPES = {
+  0x0F: 'DataNotification',
+  0xC0: 'GetRequest',
+  0xC1: 'SetRequest',
+  0xC2: 'EventNotification',
+  0xC3: 'ActionRequest',
+  0xC4: 'GetResponse',
+  0xC5: 'SetResponse',
+  0xC7: 'ActionResponse',
+  0xD8: 'ExceptionResponse',
+  0xDB: 'GeneralGloCiphering',
+}
+
+// 格式化 Pull 模式 APDU 的值用于展示
+function formatPullValue(val, dataType) {
+  if (val === undefined || val === null) return 'null'
+  if (dataType === 'octet-string' && typeof val === 'string') {
+    // 可能是 hex string
+    if (/^[0-9a-fA-F]+$/.test(val.replace(/"/g, '')) && val.replace(/"/g, '').length % 2 === 0) {
+      const cleaned = val.replace(/"/g, '')
+      if (cleaned.length === 24) {
+        // 可能是 date-time
+        try {
+          const bytes = cleaned.match(/.{1,2}/g).map(b => parseInt(b, 16))
+          const year = (bytes[0] << 8) | bytes[1]
+          if (year > 2000 && year < 2100) {
+            return `${year}-${String(bytes[2]).padStart(2,'0')}-${String(bytes[3]).padStart(2,'0')} ${String(bytes[5]).padStart(2,'0')}:${String(bytes[6]).padStart(2,'0')}:${String(bytes[7]).padStart(2,'0')} (hex: ${cleaned})`
+          }
+        } catch {}
+      }
+      return `hex: ${cleaned}`
+    }
+    return String(val)
+  }
+  if (typeof val === 'object') {
+    return JSON.stringify(val, null, 2)
+  }
+  return String(val)
+}
+
+// Pull 模式 APDU 视图组件
+function PullModeAPDUView({
+  typeName, tag, invokeId, getType, setType, actionType,
+  classId, obis, attributeId, attributeList, accessSelection, methodId,
+  result, resultCode, dataType, value, results,
+  isBlock, blockNumber, lastBlock, rawDataHex,
+  stateError, stateErrorName, serviceError, serviceErrorName,
+}) {
+  if (!typeName) return null
+
+  const isSuccess = resultCode === 0
+  const isRequest = typeName.includes('Request')
+  const isResponse = typeName.includes('Response')
+  const isException = typeName === 'ExceptionResponse'
+
+  // 子类型名称
+  let subTypeName = ''
+  if (getType !== undefined) subTypeName = GET_TYPE_NAMES[getType] || `Type ${getType}`
+  else if (setType !== undefined) subTypeName = SET_TYPE_NAMES[setType] || `Type ${setType}`
+  else if (actionType !== undefined) subTypeName = ACTION_TYPE_NAMES[actionType] || `Type ${actionType}`
+
+  return (
+    <div style={{ marginBottom: 12 }}>
+      {/* 头部信息卡片 */}
+      <Card size="small" style={{ marginBottom: 8 }}>
+        <Descriptions size="small" column={3} bordered>
+          {subTypeName && (
+            <Descriptions.Item label="子类型">
+              <Tag color="blue">{subTypeName}</Tag>
+            </Descriptions.Item>
+          )}
+          {invokeId !== undefined && invokeId !== null && (
+            <Descriptions.Item label="Invoke ID">{invokeId}</Descriptions.Item>
+          )}
+          {classId !== undefined && classId !== null && (
+            <Descriptions.Item label="Class ID">
+              <Tag color="blue">{classId}</Tag>
+              <Text type="secondary" style={{ fontSize: 11 }}>{CLASS_NAMES[classId] || ''}</Text>
+            </Descriptions.Item>
+          )}
+          {obis !== undefined && obis !== null && (
+            <Descriptions.Item label="OBIS">
+              <Text code style={{ fontSize: 11 }}>{obis}</Text>
+            </Descriptions.Item>
+          )}
+          {attributeId !== undefined && attributeId !== null && (
+            <Descriptions.Item label="Attribute ID">
+              <Tag>A{attributeId}</Tag>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {getAttributeName(classId, attributeId)}
+              </Text>
+            </Descriptions.Item>
+          )}
+          {methodId !== undefined && methodId !== null && (
+            <Descriptions.Item label="Method ID">
+              <Tag color="purple">M{methodId}</Tag>
+            </Descriptions.Item>
+          )}
+          {accessSelection !== undefined && accessSelection !== null && accessSelection !== 0 && (
+            <Descriptions.Item label="Access Selection">
+              <Tag color="orange">{accessSelection}</Tag>
+            </Descriptions.Item>
+          )}
+        </Descriptions>
+      </Card>
+
+      {/* 响应结果 */}
+      {isResponse && (
+        <Card size="small" style={{ marginBottom: 8 }}
+          title={<Text strong style={{ fontSize: 13 }}>响应结果</Text>}
+        >
+          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+            <Space size="small">
+              <Tag color={isSuccess ? 'success' : 'error'}>
+                {isSuccess ? '成功' : '失败'}
+              </Tag>
+              <Text type="secondary">Result Code: {resultCode}</Text>
+              {result && <Text type={isSuccess ? 'success' : 'danger'} style={{ fontSize: 12 }}>{result}</Text>}
+            </Space>
+
+            {/* 块传输信息 */}
+            {isBlock && (
+              <Space size="small">
+                <Tag color="cyan">DataBlock</Tag>
+                <Text type="secondary">Block #: {blockNumber}</Text>
+                {lastBlock ? (
+                  <Tag color="green" icon={<CheckCircleOutlined />}>Last Block</Tag>
+                ) : (
+                  <Tag color="orange">More Blocks</Tag>
+                )}
+              </Space>
+            )}
+
+            {/* 块数据 */}
+            {rawDataHex && (
+              <div>
+                <Text type="secondary" style={{ fontSize: 11 }}>Raw Data:</Text>
+                <div style={{
+                  marginTop: 2, maxHeight: 80, overflow: 'auto',
+                  padding: 4, background: '#fafafa', borderRadius: 4,
+                  fontFamily: 'monospace', fontSize: 11
+                }}>
+                  {rawDataHex}
+                </div>
+              </div>
+            )}
+
+            {/* 单个返回值 */}
+            {dataType && value !== undefined && value !== null && !results?.length && (
+              <div>
+                <Space size="small" style={{ marginBottom: 4 }}>
+                  <Tag color="green" style={{ fontSize: 11 }}>{dataType}</Tag>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Value:</Text>
+                </Space>
+                <div style={{
+                  padding: 8, background: '#f6ffed', borderRadius: 4,
+                  border: '1px solid #b7eb8f', fontFamily: 'monospace',
+                  fontSize: 12, wordBreak: 'break-all', maxHeight: 150, overflow: 'auto'
+                }}>
+                  {formatPullValue(value, dataType)}
+                </div>
+              </div>
+            )}
+
+            {/* With-List 结果列表 */}
+            {results && results.length > 0 && (
+              <Table
+                size="small"
+                dataSource={results}
+                rowKey={(r) => r.index}
+                pagination={false}
+                scroll={{ y: 200 }}
+                columns={[
+                  {
+                    title: '#', dataIndex: 'index', key: 'index', width: 40,
+                    render: (v) => v + 1,
+                  },
+                  {
+                    title: '状态', dataIndex: 'success', key: 'success', width: 80,
+                    render: (v) => v
+                      ? <Tag color="success">成功</Tag>
+                      : <Tag color="error">失败</Tag>,
+                  },
+                  {
+                    title: '类型', dataIndex: 'data_type', key: 'data_type', width: 120,
+                    render: (v) => v ? <Tag color="green" style={{ fontSize: 11 }}>{v}</Tag> : '-',
+                  },
+                  {
+                    title: '值', dataIndex: 'value', key: 'value',
+                    render: (v, r) => {
+                      if (v === null || v === undefined) return '-'
+                      return <Text code style={{ fontSize: 11 }}>{formatPullValue(v, r.data_type)}</Text>
+                    },
+                  },
+                  {
+                    title: '错误', dataIndex: 'error', key: 'error', width: 100,
+                    render: (v) => v ? <Tag color="error">{v}</Tag> : '-',
+                  },
+                ]}
+              />
+            )}
+          </Space>
+        </Card>
+      )}
+
+      {/* With-List 属性列表 */}
+      {attributeList && attributeList.length > 0 && (
+        <Card size="small" style={{ marginBottom: 8 }}
+          title={<Text strong style={{ fontSize: 13 }}>属性列表 ({attributeList.length})</Text>}
+        >
+          <Table
+            size="small"
+            dataSource={attributeList}
+            rowKey={(item, idx) => idx}
+            pagination={false}
+            scroll={{ y: 150 }}
+            columns={[
+              {
+                title: '#', width: 40,
+                render: (_, __, idx) => idx + 1,
+              },
+              {
+                title: 'Class', dataIndex: 'class_id', key: 'class_id', width: 80,
+                render: (v) => <Space><Tag color="blue">{v}</Tag><Text type="secondary" style={{ fontSize: 10 }}>{CLASS_NAMES[v] || ''}</Text></Space>,
+              },
+              {
+                title: 'OBIS', dataIndex: 'obis', key: 'obis', width: 150,
+                render: (v) => <Text code style={{ fontSize: 11 }}>{v}</Text>,
+              },
+              {
+                title: 'Attr', dataIndex: 'attribute_id', key: 'attribute_id', width: 50,
+                render: (v) => <Tag>A{v}</Tag>,
+              },
+            ]}
+          />
+        </Card>
+      )}
+
+      {/* ExceptionResponse 错误信息 */}
+      {isException && (
+        <Card size="small" style={{ marginBottom: 8 }}
+          title={<Text strong style={{ fontSize: 13, color: '#ff4d4f' }}>异常响应</Text>}
+        >
+          <Descriptions size="small" column={2} bordered>
+            <Descriptions.Item label="State Error">
+              <Tag color="error">{stateErrorName || stateError}</Tag>
+              <Text type="secondary" style={{ fontSize: 11 }}> (code: {stateError})</Text>
+            </Descriptions.Item>
+            <Descriptions.Item label="Service Error">
+              <Tag color="error">{serviceErrorName || serviceError}</Tag>
+              <Text type="secondary" style={{ fontSize: 11 }}> (code: {serviceError})</Text>
+            </Descriptions.Item>
+          </Descriptions>
+        </Card>
+      )}
+    </div>
+  )
+}
+
 function APDULayer({ data, pushResolved }) {
   const [selectedVersion, setSelectedVersion] = useState(null)
   const [autoDetect, setAutoDetect] = useState(true)
@@ -400,11 +666,35 @@ function APDULayer({ data, pushResolved }) {
     push_setup_version_name,
     push_object_list,
     has_class40_template,
-    item_count
+    item_count,
+    // Pull 模式 APDU 字段
+    get_type,
+    set_type,
+    action_type,
+    class_id,
+    obis,
+    attribute_id,
+    attribute_list,
+    access_selection,
+    method_id,
+    result,
+    result_code,
+    data_type,
+    value,
+    results,
+    is_block,
+    block_number,
+    last_block,
+    raw_data_hex,
+    state_error,
+    state_error_name,
+    service_error,
+    service_error_name,
   } = data
 
-  // 优先使用 apdu_type 或 type_name
-  const displayType = apdu_type || type_name || `Tag 0x${tag?.toString(16).padStart(2, '0').toUpperCase()}`
+  // 优先使用 tag 映射确保类型正确（0xC1=SetRequest, 0xC4=GetResponse 等）
+  // 其次使用 apdu_type 或 type_name
+  const displayType = APDU_TAG_TYPES[tag] || apdu_type || type_name || `Tag 0x${tag?.toString(16).padStart(2, '0').toUpperCase()}`
 
   const treeData = useMemo(() => {
     if (!items || items.length === 0) return []
@@ -412,7 +702,10 @@ function APDULayer({ data, pushResolved }) {
   }, [items])
 
   // 是否是 DataNotification 类型
-  const isDataNotification = type_name === 'DataNotification' || apdu_type === 'DataNotification'
+  const isDataNotification = displayType === 'DataNotification'
+
+  // 是否是 Pull 模式 APDU（非 DataNotification）
+  const isPullModeAPDU = !isDataNotification
 
   // Push object list 表格列定义
   const pushObjColumns = [
@@ -655,6 +948,37 @@ function APDULayer({ data, pushResolved }) {
         onSuccess={handleEditorSuccess}
       />
 
+      {/* Pull 模式 APDU 详细信息展示 */}
+      {isPullModeAPDU && (
+        <PullModeAPDUView
+          typeName={displayType}
+          tag={tag}
+          invokeId={invoke_id}
+          getType={get_type}
+          setType={set_type}
+          actionType={action_type}
+          classId={class_id}
+          obis={obis}
+          attributeId={attribute_id}
+          attributeList={attribute_list}
+          accessSelection={access_selection}
+          methodId={method_id}
+          result={result}
+          resultCode={result_code}
+          dataType={data_type}
+          value={value}
+          results={results}
+          isBlock={is_block}
+          blockNumber={block_number}
+          lastBlock={last_block}
+          rawDataHex={raw_data_hex}
+          stateError={state_error}
+          stateErrorName={state_error_name}
+          serviceError={service_error}
+          serviceErrorName={service_error_name}
+        />
+      )}
+
       {treeData.length > 0 ? (
         <div
           style={{
@@ -675,11 +999,13 @@ function APDULayer({ data, pushResolved }) {
           />
         </div>
       ) : (
-        <Empty
-          image={<ApiOutlined style={{ fontSize: 32, color: '#d9d9d9' }} />}
-          description="无解析数据结构"
-          style={{ padding: 20 }}
-        />
+        !isPullModeAPDU && (
+          <Empty
+            image={<ApiOutlined style={{ fontSize: 32, color: '#d9d9d9' }} />}
+            description="无解析数据结构"
+            style={{ padding: 20 }}
+          />
+        )
       )}
     </div>
   )

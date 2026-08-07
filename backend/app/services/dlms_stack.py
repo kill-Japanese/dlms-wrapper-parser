@@ -32,6 +32,7 @@ from app.services.apdu_parser import parse_apdu, build_apdu
 from app.services.datamodel import data_model_manager
 from app.services.log_manager import log_manager
 from app.utils.ber_encoder import decode_data, _decode_date_time
+from app.utils.obis_utils import obis_str_to_bytes
 
 
 def _convert_bytes_to_hex(obj):
@@ -131,6 +132,360 @@ def _enhance_items_with_datamodel(items):
             continue
     
     return items
+
+
+def _scan_raw_data_for_descriptors(raw_bytes: bytes, result, frame_id: str):
+    """
+    扫描原始APDU字节流中的COSEM属性描述符模式，进行数据模型匹配。
+
+    当APDU解析失败或APDU类型不直接携带描述符时（如GetResponse），
+    通过模式匹配从原始数据中提取 class_id + OBIS + attribute_id 组合，
+    并匹配数据模型。
+
+    扫描模式:
+    - octet-string(6) 模式: 09 06 XX XX XX XX XX XX (OBIS码)
+      前面通常有 class_id (12 00 XX = long-unsigned) 和 structure tag (02 04)
+      后面通常有 attribute_id (0f XX = integer)
+    """
+    if not data_model_manager.is_loaded:
+        return
+
+    if not raw_bytes or len(raw_bytes) < 10:
+        return
+
+    matched_set = set()  # 用于去重: (class_id, obis_hex, attr_id)
+    # 收集已有的 (class_id, attr_id) 对，用于类级回退去重
+    existing_class_attr = set()
+    for obj in result.matched_objects:
+        existing_class_attr.add((obj.get('class_id'), obj.get('attribute_id', 0)))
+
+    # 模式1: 扫描 push_object_list / capture_objects 结构
+    # 每个条目格式: structure(4) { long-unsigned(class_id), octet-string(6)(OBIS), integer(attr_id), long-unsigned(data_index) }
+    # 字节模式: 02 04 12 00 XX 09 06 YY YY YY YY YY YY 0f ZZ 12 00 WW
+    i = 0
+    while i < len(raw_bytes) - 17:
+        # 查找 structure(4) + long-unsigned + octet-string(6) 模式
+        if (raw_bytes[i] == 0x02 and raw_bytes[i+1] == 0x04 and
+            raw_bytes[i+2] == 0x12 and raw_bytes[i+3] == 0x00 and
+            raw_bytes[i+5] == 0x09 and raw_bytes[i+6] == 0x06):
+
+            class_id = raw_bytes[i+4]  # class_id (1 byte, since high byte is 0x00)
+            obis_bytes = raw_bytes[i+7:i+13]  # 6 bytes OBIS
+
+            # 查找后面的 attribute_id (0f XX = integer)
+            attr_id = 2  # 默认值
+            if i + 13 < len(raw_bytes) and raw_bytes[i+13] == 0x0f:
+                attr_id = raw_bytes[i+14]
+
+            # 构建唯一标识
+            obis_hex = obis_bytes.hex()
+            key = (class_id, obis_hex, attr_id)
+            if key in matched_set:
+                i += 1
+                continue
+            matched_set.add(key)
+
+            try:
+                matched = data_model_manager.match_obis(
+                    class_id=class_id,
+                    obis_bytes=obis_bytes,
+                    attribute_id=attr_id,
+                )
+                if matched:
+                    matched_dict = matched.model_dump()
+                    if matched_dict not in result.matched_objects:
+                        result.matched_objects.append(matched_dict)
+                        existing_class_attr.add((class_id, attr_id))
+                        a, b = obis_bytes[0], obis_bytes[1]
+                        c, d = obis_bytes[2], obis_bytes[3]
+                        e, f = obis_bytes[4], obis_bytes[5]
+                        obis_str = f"{a}-{b}:{c}.{d}.{e}.{f}"
+                        log_manager.info(
+                            frame_id, "datamodel",
+                            f"数模匹配成功(原始扫描): class={class_id}, obis={obis_str}, "
+                            f"attr={attr_id} -> {matched.name}"
+                        )
+                elif hasattr(data_model_manager, 'match_by_class'):
+                    # 类级回退匹配 - 跳过已有同class+attr的匹配
+                    if (class_id, attr_id) not in existing_class_attr:
+                        fallback = data_model_manager.match_by_class(class_id, attr_id)
+                        if fallback:
+                            fb_dict = fallback.model_dump()
+                            fb_dict["is_fallback"] = True
+                            a, b = obis_bytes[0], obis_bytes[1]
+                            c, d = obis_bytes[2], obis_bytes[3]
+                            e, f = obis_bytes[4], obis_bytes[5]
+                            fb_dict["original_obis"] = f"{a}-{b}:{c}.{d}.{e}.{f}"
+                            if fb_dict not in result.matched_objects:
+                                result.matched_objects.append(fb_dict)
+                                existing_class_attr.add((class_id, attr_id))
+                            log_manager.info(
+                                frame_id, "datamodel",
+                                f"数模回退匹配(原始扫描): class={class_id} -> "
+                                f"{fallback.name} (obis={fallback.obis})"
+                            )
+            except Exception:
+                pass
+
+        i += 1
+
+    # 模式2: 扫描独立的 octet-string(6) 模式（仅OBIS，无class_id上下文）
+    # 尝试从前后字节推断 class_id
+    i = 0
+    while i < len(raw_bytes) - 8:
+        if raw_bytes[i] == 0x09 and raw_bytes[i+1] == 0x06:
+            obis_bytes = raw_bytes[i+2:i+8]
+
+            # 跳过全零或无效OBIS
+            if obis_bytes == b'\x00\x00\x00\x00\x00\x00':
+                i += 1
+                continue
+
+            # 尝试从前面的 long-unsigned (12 00 XX) 获取 class_id
+            class_id = None
+            if i >= 3 and raw_bytes[i-3] == 0x12 and raw_bytes[i-2] == 0x00:
+                class_id = raw_bytes[i-1]
+            # 也尝试从更前面查找 structure + long-unsigned
+            elif i >= 4 and raw_bytes[i-4] == 0x02 and raw_bytes[i-3] == 0x04 and raw_bytes[i-2] == 0x12 and raw_bytes[i-1] == 0x00:
+                if i >= 5:
+                    class_id = raw_bytes[i-5]  # 这不对，让我重新检查
+
+            # 如果无法确定class_id，尝试常见class_id
+            class_ids_to_try = [class_id] if class_id else [1, 3, 4, 7, 8, 40]
+            class_ids_to_try = [c for c in class_ids_to_try if c is not None]
+
+            # 尝试获取 attribute_id
+            attr_id = 2  # 默认
+            if i + 8 < len(raw_bytes) and raw_bytes[i+8] == 0x0f:
+                attr_id = raw_bytes[i+9]
+
+            obis_hex = obis_bytes.hex()
+            for cid in class_ids_to_try:
+                key = (cid, obis_hex, attr_id)
+                if key in matched_set:
+                    continue
+                matched_set.add(key)
+
+                try:
+                    matched = data_model_manager.match_obis(
+                        class_id=cid,
+                        obis_bytes=obis_bytes,
+                        attribute_id=attr_id,
+                    )
+                    if matched:
+                        matched_dict = matched.model_dump()
+                        if matched_dict not in result.matched_objects:
+                            result.matched_objects.append(matched_dict)
+                            existing_class_attr.add((cid, attr_id))
+                            a, b = obis_bytes[0], obis_bytes[1]
+                            c, d = obis_bytes[2], obis_bytes[3]
+                            e, f = obis_bytes[4], obis_bytes[5]
+                            obis_str = f"{a}-{b}:{c}.{d}.{e}.{f}"
+                            log_manager.info(
+                                frame_id, "datamodel",
+                                f"数模匹配成功(OBIS扫描): class={cid}, obis={obis_str}, "
+                                f"attr={attr_id} -> {matched.name}"
+                            )
+                        break  # 找到匹配就停止尝试其他class_id
+                    elif hasattr(data_model_manager, 'match_by_class'):
+                        # 类级回退匹配 - 跳过已有同class+attr的匹配
+                        if (cid, attr_id) not in existing_class_attr:
+                            fallback = data_model_manager.match_by_class(cid, attr_id)
+                            if fallback:
+                                fb_dict = fallback.model_dump()
+                                fb_dict["is_fallback"] = True
+                                a, b = obis_bytes[0], obis_bytes[1]
+                                c, d = obis_bytes[2], obis_bytes[3]
+                                e, f = obis_bytes[4], obis_bytes[5]
+                                fb_dict["original_obis"] = f"{a}-{b}:{c}.{d}.{e}.{f}"
+                                if fb_dict not in result.matched_objects:
+                                    result.matched_objects.append(fb_dict)
+                                    existing_class_attr.add((cid, attr_id))
+                                    log_manager.info(
+                                        frame_id, "datamodel",
+                                        f"数模回退匹配(OBIS扫描): class={cid} -> "
+                                        f"{fallback.name} (obis={fallback.obis})"
+                                    )
+                                break  # 找到回退匹配也停止
+                except Exception:
+                    continue
+
+        i += 1
+
+
+def _matched_apdu_descriptors(apdu_obj, result, frame_id: str):
+    """
+    对 GetRequest/SetRequest/ActionRequest/EventNotification 等APDU的
+    COSEM属性/方法描述符进行数据模型匹配。
+
+    这些APDU类型在解析后直接携带 class_id, obis, attribute_id/method_id 字段，
+    但不在 items 列表中。本函数提取这些字段并匹配数据模型，
+    将匹配结果加入 result.matched_objects。
+    """
+    if not data_model_manager.is_loaded:
+        return
+
+    type_name = apdu_obj.type_name
+
+    # 收集需要匹配的描述符列表
+    descriptors_to_match = []
+
+    if type_name == "GetRequest":
+        if hasattr(apdu_obj, 'get_type') and apdu_obj.get_type == 1:
+            # GetRequest-Normal: 单个描述符
+            if apdu_obj.class_id is not None and apdu_obj.obis:
+                descriptors_to_match.append({
+                    "class_id": apdu_obj.class_id,
+                    "obis": apdu_obj.obis,
+                    "attribute_id": apdu_obj.attribute_id or 2,
+                })
+        elif hasattr(apdu_obj, 'get_type') and apdu_obj.get_type == 3:
+            # GetRequest-WithList: 多个描述符
+            if hasattr(apdu_obj, 'attribute_list') and apdu_obj.attribute_list:
+                for desc in apdu_obj.attribute_list:
+                    descriptors_to_match.append({
+                        "class_id": desc.class_id,
+                        "obis": desc.obis,
+                        "attribute_id": desc.attribute_id,
+                    })
+
+    elif type_name == "SetRequest":
+        if hasattr(apdu_obj, 'set_type') and apdu_obj.set_type == 1:
+            if apdu_obj.class_id is not None and apdu_obj.obis:
+                descriptors_to_match.append({
+                    "class_id": apdu_obj.class_id,
+                    "obis": apdu_obj.obis,
+                    "attribute_id": apdu_obj.attribute_id or 2,
+                })
+
+    elif type_name == "ActionRequest":
+        if hasattr(apdu_obj, 'action_type') and apdu_obj.action_type == 1:
+            if apdu_obj.class_id is not None and apdu_obj.obis:
+                # ActionRequest 使用 method_id 而非 attribute_id
+                descriptors_to_match.append({
+                    "class_id": apdu_obj.class_id,
+                    "obis": apdu_obj.obis,
+                    "attribute_id": getattr(apdu_obj, 'method_id', 1),  # method_id 作为 attribute_id 传入匹配
+                })
+
+    elif type_name == "EventNotification":
+        if apdu_obj.class_id is not None and apdu_obj.obis:
+            descriptors_to_match.append({
+                "class_id": apdu_obj.class_id,
+                "obis": apdu_obj.obis,
+                "attribute_id": apdu_obj.attribute_id or 2,
+            })
+
+    elif type_name in ("GetResponse", "SetResponse", "ActionResponse"):
+        # GetResponse/SetResponse/ActionResponse 不直接携带描述符
+        # 但如果解析成功且value中包含结构化数据（如push_object_list），
+        # 则通过原始数据扫描进行匹配
+        raw_hex = getattr(apdu_obj, 'raw_hex', '') or getattr(apdu_obj, 'raw_data_hex', '')
+        if raw_hex:
+            try:
+                raw_bytes = hex_to_bytes(raw_hex)
+                _scan_raw_data_for_descriptors(raw_bytes, result, frame_id)
+            except Exception:
+                pass
+        return  # 直接返回，后面的描述符匹配不适用于Response类型
+
+    # 已匹配的 (class_id, attr_id) 对，用于类级回退去重
+    matched_class_attr = set()
+
+    def _do_match(class_id, obis_bytes_val, attr_id, obis_str_for_log=""):
+        """执行精确匹配+类级回退匹配"""
+        try:
+            matched = data_model_manager.match_obis(
+                class_id=class_id,
+                obis_bytes=obis_bytes_val,
+                attribute_id=attr_id,
+            )
+            if matched:
+                matched_dict = matched.model_dump()
+                if matched_dict not in result.matched_objects:
+                    result.matched_objects.append(matched_dict)
+                    matched_class_attr.add((class_id, attr_id))
+                    log_manager.info(
+                        frame_id, "datamodel",
+                        f"数模匹配成功: class={class_id}, obis={obis_str_for_log}, "
+                        f"attr={attr_id} -> {matched.name}"
+                    )
+                return True
+            # 类级回退匹配
+            if hasattr(data_model_manager, 'match_by_class'):
+                if (class_id, attr_id) in matched_class_attr:
+                    return True  # 已有同class+attr的匹配
+                fallback = data_model_manager.match_by_class(class_id, attr_id)
+                if fallback:
+                    fb_dict = fallback.model_dump()
+                    fb_dict["is_fallback"] = True
+                    fb_dict["original_obis"] = obis_str_for_log
+                    if fb_dict not in result.matched_objects:
+                        result.matched_objects.append(fb_dict)
+                        matched_class_attr.add((class_id, attr_id))
+                        log_manager.info(
+                            frame_id, "datamodel",
+                            f"数模回退匹配: class={class_id}, obis={obis_str_for_log} -> "
+                            f"使用类级匹配 {fallback.obis}: {fallback.name}"
+                        )
+                    return True
+        except Exception:
+            pass
+        return False
+
+    # 主描述符匹配（精确+类级回退）
+    for desc in descriptors_to_match:
+        try:
+            obis_val = desc["obis"]
+            if isinstance(obis_val, str):
+                if "-" in obis_val or ":" in obis_val:
+                    obis_bytes = obis_str_to_bytes(obis_val)
+                else:
+                    obis_bytes = hex_to_bytes(obis_val)
+            else:
+                obis_bytes = obis_val
+            obis_str = desc["obis"] if isinstance(desc["obis"], str) else bytes_to_hex(obis_bytes)
+            _do_match(desc["class_id"], obis_bytes, desc["attribute_id"], obis_str)
+        except Exception:
+            continue
+
+    # SetRequest的value中提取capture_objects逐项匹配
+    # capture_objects格式: array of structure {class_id, obis, attribute_id, data_index}
+    if type_name == "SetRequest" and hasattr(apdu_obj, 'value') and isinstance(apdu_obj.value, list):
+        from app.utils.obis_utils import obis_bytes_to_str as _obis_to_str
+        for item in apdu_obj.value:
+            if isinstance(item, (list, tuple)) and len(item) >= 3:
+                co_class_id = item[0] if isinstance(item[0], int) else None
+                co_obis_raw = item[1]
+                co_attr_id = item[2] if isinstance(item[2], int) else 2
+                if co_class_id is None:
+                    continue
+                # 转换OBIS为bytes
+                if isinstance(co_obis_raw, str):
+                    try:
+                        if "-" in co_obis_raw or ":" in co_obis_raw:
+                            co_obis_bytes = obis_str_to_bytes(co_obis_raw)
+                        else:
+                            co_obis_bytes = hex_to_bytes(co_obis_raw)
+                        co_obis_str = co_obis_raw
+                    except Exception:
+                        continue
+                elif isinstance(co_obis_raw, (bytes, bytearray)):
+                    co_obis_bytes = bytes(co_obis_raw)
+                    co_obis_str = _obis_to_str(co_obis_bytes)
+                else:
+                    continue
+                _do_match(co_class_id, co_obis_bytes, co_attr_id, co_obis_str)
+
+    # 对所有APDU类型（包括Request类型），额外扫描原始数据中的OBIS模式
+    # 这对于SetRequest（value中包含capture_objects等嵌套描述符）尤为重要
+    try:
+        raw_hex = getattr(apdu_obj, 'raw_hex', '') or getattr(apdu_obj, 'raw_data_hex', '')
+        if raw_hex:
+            raw_bytes = hex_to_bytes(raw_hex)
+            _scan_raw_data_for_descriptors(raw_bytes, result, frame_id)
+    except Exception:
+        pass
 
 
 def parse_frame(
@@ -358,6 +713,7 @@ def parse_frame(
             )
 
             # 提取数据项并匹配数据模型
+            # 1. DataNotification: 通过 items 列表匹配
             if hasattr(apdu_obj, 'items') and apdu_obj.items:
                 for item in apdu_obj.items:
                     matched = data_model_manager.match_obis(
@@ -367,6 +723,15 @@ def parse_frame(
                     )
                     if matched:
                         result.matched_objects.append(matched.model_dump())
+
+            # 2. GetRequest/SetRequest/ActionRequest/EventNotification: 通过 descriptor 字段匹配
+            #    GetResponse/SetResponse/ActionResponse: 通过原始数据扫描匹配
+            _matched_apdu_descriptors(apdu_obj, result, frame_id)
+
+            # 3. 对所有APDU类型，额外扫描原始数据中的OBIS模式进行数模匹配
+            #    这可以捕获APDU解析失败或解析不完整时遗漏的描述符
+            if not result.matched_objects or apdu_obj.type_name in ("GetResponse", "SetResponse", "ActionResponse"):
+                _scan_raw_data_for_descriptors(payload, result, frame_id)
 
             # Step 6: Push 数据深度解析（Profile buffer 逐元素解析等）
             # 当 APDU 类型为 DataNotification 且包含 push_object_list 时，
@@ -432,6 +797,9 @@ def parse_frame(
             result.errors.append(f"APDU解析失败: {e}")
             result.apdu = {"raw_hex": bytes_to_hex(payload), "parse_error": str(e)}
 
+            # 即使APDU解析失败，也尝试扫描原始数据中的OBIS模式进行数模匹配
+            _scan_raw_data_for_descriptors(payload, result, frame_id)
+
     except Exception as e:
         log_manager.error(frame_id, "system", f"解析过程异常: {e}")
         result.errors.append(f"系统错误: {e}")
@@ -457,11 +825,11 @@ def _is_ciphered_payload(data: bytes) -> bool:
     first_byte = data[0]
 
     # 常见的明文APDU标签（如果匹配，大概率不是加密数据）
-    # DataNotification=15, GetRequest=192, GetResponse=193,
-    # SetRequest=194, SetResponse=195, EventNotification=196,
-    # ActionRequest=199, ActionResponse=200, InitiateRequest=1,
+    # DataNotification=15(0x0F), GetRequest=192(0xC0), SetRequest=193(0xC1),
+    # EventNotification=194(0xC2), ActionRequest=195(0xC3), GetResponse=196(0xC4),
+    # SetResponse=197(0xC5), ActionResponse=199(0xC7), InitiateRequest=1,
     # InitiateResponse=8, ConfirmedServiceError=14
-    plaintext_apdu_tags = {15, 192, 193, 194, 195, 196, 199, 200, 1, 8, 14}
+    plaintext_apdu_tags = {15, 192, 193, 194, 195, 196, 197, 199, 1, 8, 14}
 
     if first_byte in plaintext_apdu_tags:
         # 还需要进一步验证：检查是否真的是明文APDU
@@ -526,6 +894,7 @@ def build_frame(
     src_wport: int = 1,
     dst_wport: int = 16,
     encrypt: bool = False,
+    compress: bool = False,
     encryption_key: Optional[str] = None,
     system_title: Optional[str] = None,
     guek: Optional[str] = None,
@@ -534,6 +903,8 @@ def build_frame(
     kek: Optional[str] = None,
     invocation_counter: int = 1,
     key_id: int = 0,
+    raw_apdu_hex: Optional[str] = None,
+    with_wrapper: bool = False,
 ) -> dict:
     """
     构建DLMS帧
@@ -551,6 +922,7 @@ def build_frame(
         src_wport: 源WPort
         dst_wport: 目的WPort
         encrypt: 是否加密
+        compress: 是否V.44压缩（加密前压缩）
         encryption_key: 加密密钥（十六进制，兼容别名，映射到guek）
         system_title: 系统标题（十六进制）
         guek: Global Unicast Encryption Key（十六进制）
@@ -559,9 +931,12 @@ def build_frame(
         kek: Key Encryption Key（十六进制）
         invocation_counter: 调用计数器
         key_id: 密钥标识 (0=unicast/GUEK, 1=broadcast/GUBK, 2=system)
+        raw_apdu_hex: 原始APDU十六进制数据（如果提供，则跳过APDU构建步骤，直接使用此数据进行打包）
+        with_wrapper: 是否封装Wrapper帧（默认False，仅APDU->V.44->general-glo-ciphering）
 
     Returns:
         dict: {success, hex_data, frame_length, message}
+    }
     """
     try:
         # 构建密钥字典
@@ -576,12 +951,18 @@ def build_frame(
         if kek:
             keys_dict["kek"] = hex_to_bytes(kek)
 
-        # Step 1: 构建APDU
-        apdu_data = build_apdu(apdu_type, params)
+        # Step 1: 获取APDU数据
+        if raw_apdu_hex:
+            # 使用原始APDU数据，跳过构建步骤
+            apdu_data = hex_to_bytes(raw_apdu_hex)
+        else:
+            apdu_data = build_apdu(apdu_type, params)
 
-        # Step 2: 加密（可选）
-        if encrypt:
-            if not keys_dict or not system_title:
+        # Step 2: 压缩 + 加密（可选）
+        # 打包流程: APDU -> V.44压缩 -> AES-GCM加密 -> General-Glo-Ciphering封装 -> Wrapper
+        # 当 compress=True 时，SC字节会置位压缩标志(bit7)，加密后SC同时置位加密标志(bit5)
+        if encrypt or compress:
+            if encrypt and (not keys_dict or not system_title):
                 key_type_names = {0: "GUEK", 1: "GUBK", 2: "System Key"}
                 required_key = key_type_names.get(key_id, "GUEK")
                 return {
@@ -590,34 +971,71 @@ def build_frame(
                     "frame_length": 0,
                     "message": f"加密需要提供{required_key}密钥和系统标题",
                 }
-            st_bytes = hex_to_bytes(system_title)
-            try:
-                apdu_data = build_ciphered(
-                    apdu_data,
-                    key=keys_dict.get("guek"),
-                    system_title=st_bytes,
-                    invocation_counter=invocation_counter,
-                    encrypted=True,
-                    authenticated=True,
-                    compressed=False,
-                    key_id=key_id,
-                    keys=keys_dict if len(keys_dict) > 1 else None,
-                )
-            except Exception as e:
-                return {
-                    "success": False,
-                    "hex_data": "",
-                    "frame_length": 0,
-                    "message": f"加密失败: {e}",
-                }
+            if compress and not encrypt:
+                # 仅压缩不加密 - 使用 General-Glo-Ciphering 封装但不加密
+                # SC字节只置位压缩标志
+                if not system_title:
+                    return {
+                        "success": False,
+                        "hex_data": "",
+                        "frame_length": 0,
+                        "message": "压缩封装需要提供系统标题",
+                    }
+                st_bytes = hex_to_bytes(system_title)
+                try:
+                    apdu_data = build_ciphered(
+                        apdu_data,
+                        key=keys_dict.get("guek"),
+                        system_title=st_bytes,
+                        invocation_counter=invocation_counter,
+                        encrypted=False,
+                        authenticated=False,
+                        compressed=True,
+                        key_id=key_id,
+                        keys=keys_dict if len(keys_dict) > 1 else None,
+                    )
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "hex_data": "",
+                        "frame_length": 0,
+                        "message": f"压缩封装失败: {e}",
+                    }
+            elif encrypt:
+                st_bytes = hex_to_bytes(system_title) if system_title else b""
+                try:
+                    apdu_data = build_ciphered(
+                        apdu_data,
+                        key=keys_dict.get("guek"),
+                        system_title=st_bytes,
+                        invocation_counter=invocation_counter,
+                        encrypted=True,
+                        authenticated=True,
+                        compressed=compress,  # 传入压缩标志
+                        key_id=key_id,
+                        keys=keys_dict if len(keys_dict) > 1 else None,
+                    )
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "hex_data": "",
+                        "frame_length": 0,
+                        "message": f"加密失败: {e}",
+                    }
 
-        # Step 3: Wrapper封装
-        frame = build_wpd(apdu_data, src_wport=src_wport, dst_wport=dst_wport)
+        # Step 3: Wrapper封装（可选）
+        # 打包流程: APDU -> V.44压缩 -> general-glo-ciphering (-> Wrapper封装)
+        # 默认不封装Wrapper，仅当 with_wrapper=True 时添加
+        if with_wrapper:
+            frame = build_wpd(apdu_data, src_wport=src_wport, dst_wport=dst_wport)
+        else:
+            frame = apdu_data
 
         return {
             "success": True,
             "hex_data": bytes_to_hex(frame),
             "frame_length": len(frame),
+            "apdu_hex": bytes_to_hex(apdu_data) if with_wrapper else "",
             "message": "组帧成功",
         }
 

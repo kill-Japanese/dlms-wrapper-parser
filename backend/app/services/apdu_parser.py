@@ -1,17 +1,20 @@
 """
 APDU解析器 (Application Layer Protocol Data Unit)
 
-DLMS/COSEM APDU 类型和标签:
+DLMS/COSEM APDU 类型和标签 (按IEC 62056-6 / Gurux标准):
 - DataNotification: tag = 0x0F (15)
 - GetRequest: tag = 0xC0 (192)
-- GetResponse: tag = 0xC1 (193)
-- SetRequest: tag = 0xC2 (194)
-- SetResponse: tag = 0xC3 (195)
-- EventNotification: tag = 0xC4 (196)
-- ActionRequest: tag = 0xC7 (199)
-- ActionResponse: tag = 0xC8 (200)
+- SetRequest: tag = 0xC1 (193)
+- EventNotification: tag = 0xC2 (194)
+- ActionRequest: tag = 0xC3 (195)
+- GetResponse: tag = 0xC4 (196)
+- SetResponse: tag = 0xC5 (197)
+- ActionResponse: tag = 0xC7 (199)
 - GeneralGloCiphering: tag = 0xDB (219)
 - GeneralCiphering: tag = 0xDA (218)
+
+注意: 编码格式为 tag(1字节) + subtype(1字节) + data...
+  例如: GetRequest-Normal = 0xC0 0x01, SetRequest-Normal = 0xC1 0x01
 """
 from typing import Optional, Any, List, Tuple
 
@@ -26,6 +29,7 @@ from app.models.apdu import (
     EventNotificationAPDU,
     ActionRequestAPDU,
     ActionResponseAPDU,
+    ExceptionResponseAPDU,
     GeneralGloCipheringAPDU,
     GeneralCipheringAPDU,
     UnknownAPDU,
@@ -43,6 +47,24 @@ from app.utils.push_setup_versions import (
     get_version_info,
     PushObjectDefinition,
 )
+
+
+def _make_value_serializable(val):
+    """
+    递归将解析值中的bytes/bytearray转换为可JSON序列化的格式。
+    bytes → 十六进制字符串
+    dict中的bytes值 → 十六进制字符串
+    list中的bytes元素 → 十六进制字符串
+    """
+    if isinstance(val, (bytes, bytearray)):
+        return val.hex()
+    elif isinstance(val, dict):
+        return {k: _make_value_serializable(v) for k, v in val.items()}
+    elif isinstance(val, list):
+        return [_make_value_serializable(item) for item in val]
+    elif isinstance(val, tuple):
+        return [_make_value_serializable(item) for item in val]
+    return val
 
 
 class APDUParser:
@@ -66,6 +88,47 @@ class APDUParser:
         """解析uint32 (大端)"""
         val = int.from_bytes(data[offset:offset + 4], "big")
         return val, offset + 4
+
+    @classmethod
+    def _parse_invoke_id(cls, data: bytes, offset: int) -> tuple[int, int]:
+        """
+        智能解析 invoke-id-and-priority
+
+        DLMS标准: invoke-id-and-priority 为1字节
+        旧版兼容: 曾使用4字节(uint32)
+
+        策略:
+        1. 先尝试1字节解析，检查后续result_tag是否有效(0=data, 1=datablock, 2-250=error)
+        2. 如果1字节的result_tag无效，尝试4字节解析
+        3. 如果4字节的result_tag也无效，回退到1字节(标准)
+
+        Returns:
+            (invoke_id, new_offset)
+        """
+        # 尝试1字节(标准DLMS)
+        if offset < len(data):
+            invoke_id_1byte = data[offset]
+            # 检查后续字节是否是有效的result_tag
+            if offset + 1 < len(data):
+                next_byte = data[offset + 1]
+                # result_tag: 0=data, 1=datablock, 2-250=error, 都是有效值
+                # 但如果next_byte看起来像数据类型标签(如0x01=array, 0x02=structure等)，
+                # 说明1字节解析可能不对
+                if next_byte <= 250:
+                    return invoke_id_1byte, offset + 1
+
+        # 尝试4字节(旧版兼容)
+        if offset + 4 <= len(data):
+            invoke_id_4byte = int.from_bytes(data[offset:offset + 4], "big")
+            if offset + 4 < len(data):
+                next_byte = data[offset + 4]
+                if next_byte <= 250:
+                    return invoke_id_4byte, offset + 4
+
+        # 默认使用1字节(标准DLMS)
+        if offset < len(data):
+            return data[offset], offset + 1
+        return 0, offset
 
     @staticmethod
     def _parse_int32(data: bytes, offset: int) -> tuple[int, int]:
@@ -574,10 +637,20 @@ class APDUParser:
         if tag != 0xC0:
             raise ValueError(f"不是GetRequest APDU，tag={tag}")
 
+        # 边界检查：至少需要 tag(1) + get_type(1) + invoke_id(1) = 3 字节
+        if len(data) < 3:
+            return GetRequestAPDU(
+                tag=tag,
+                type_name="GetRequest",
+                get_type=0,
+                invoke_id=0,
+                raw_hex=bytes_to_hex(data),
+            )
+
         get_type = data[offset]
         offset += 1
 
-        invoke_id, offset = cls._parse_uint32(data, offset)
+        invoke_id, offset = cls._parse_invoke_id(data, offset)
 
         class_id = None
         obis = None
@@ -587,19 +660,32 @@ class APDUParser:
         block_number = None
 
         if get_type == 1:  # Get-Request-Normal
-            # COSEM attribute descriptor
-            desc, offset = cls._parse_cosem_attribute_descriptor(data, offset)
-            class_id = desc["class_id"]
-            obis = desc["obis"]
-            attribute_id = desc["attribute_id"]
-            # access-selection (可选，通常1字节，0表示无)
-            if offset < len(data):
-                access_selection = data[offset]
-                offset += 1
+            # COSEM attribute descriptor (容错解析，数据可能被截断)
+            remaining = len(data) - offset
+            if remaining >= 9:
+                # 完整的描述符
+                desc, offset = cls._parse_cosem_attribute_descriptor(data, offset)
+                class_id = desc["class_id"]
+                obis = desc["obis"]
+                attribute_id = desc["attribute_id"]
+                # access-selection (可选，通常1字节，0表示无)
+                if offset < len(data):
+                    access_selection = data[offset]
+                    offset += 1
+            elif remaining >= 2:
+                # 部分描述符：至少能读 class_id
+                class_id, offset = cls._parse_uint16(data, offset)
+                if remaining >= 8:
+                    # 能读 class_id(2) + obis(6)
+                    obis_bytes, offset = cls._parse_octet_string(data, offset, 6)
+                    obis = obis_bytes_to_str(obis_bytes)
+                if remaining >= 9:
+                    attribute_id, offset = cls._parse_uint8(data, offset)
 
         elif get_type == 2:  # Get-Request-Next (datablock)
             # DataBlock-G = {block-number uint32, raw-data octet-string}
-            block_number, offset = cls._parse_uint32(data, offset)
+            if offset + 4 <= len(data):
+                block_number, offset = cls._parse_uint32(data, offset)
             # 后面还有数据块内容
 
         elif get_type == 3:  # Get-Request-With-List
@@ -633,7 +719,7 @@ class APDUParser:
     @classmethod
     def parse_get_response(cls, data: bytes) -> GetResponseAPDU:
         """
-        解析 GetResponse APDU (tag=0xC1, 193)
+        解析 GetResponse APDU (tag=0xC4, 196)
 
         Get-Response-Normal (type=1):
         {
@@ -675,13 +761,25 @@ class APDUParser:
         tag = data[offset]
         offset += 1
 
-        if tag != 0xC1:
+        if tag != 0xC4:
             raise ValueError(f"不是GetResponse APDU，tag={tag}")
+
+        # 边界检查：GetResponse 至少需要 tag(1) + get_type(1) + invoke_id(1) = 3 字节
+        if len(data) < 3:
+            return GetResponseAPDU(
+                tag=tag,
+                type_name="GetResponse",
+                get_type=0,
+                invoke_id=0,
+                result=f"data_truncated (need>=3 bytes, got {len(data)})",
+                raw_data_hex=bytes_to_hex(data),
+                raw_hex=bytes_to_hex(data),
+            )
 
         get_type = data[offset]
         offset += 1
 
-        invoke_id, offset = cls._parse_uint32(data, offset)
+        invoke_id, offset = cls._parse_invoke_id(data, offset)
 
         result_desc = "success"
         result_code = 0
@@ -809,28 +907,63 @@ class APDUParser:
 
     @classmethod
     def parse_set_request(cls, data: bytes) -> SetRequestAPDU:
-        """解析SetRequest APDU (tag=0xC2)"""
+        """解析SetRequest APDU (tag=0xC1)
+
+        Set-Request-Normal (type=1):
+        {
+            invoke-id-and-priority  Invoke-Id-And-Priority,
+            cosem-attribute-descriptor  CosemAttributeDescriptor,
+            access-selection        AccessSelection OPTIONAL (0=无, 1=有),
+            value                   Data
+        }
+        """
         offset = 0
         tag = data[offset]
         offset += 1
 
-        if tag != 0xC2:
+        if tag != 0xC1:
             raise ValueError(f"不是SetRequest APDU，tag={tag}")
 
         set_type = data[offset]
         offset += 1
 
-        invoke_id, offset = cls._parse_uint32(data, offset)
+        invoke_id, offset = cls._parse_invoke_id(data, offset)
 
         class_id = None
         obis = None
         attribute_id = None
+        access_selection = 0
+        data_type = None
+        value = None
 
         if set_type == 1 and offset + 9 <= len(data):
+            # 解析 Cosem-Attribute-Descriptor
             desc, offset = cls._parse_cosem_attribute_descriptor(data, offset)
             class_id = desc["class_id"]
             obis = desc["obis"]
             attribute_id = desc["attribute_id"]
+
+            # 解析 access-selection (1 byte, 0=无, 1=有)
+            if offset < len(data):
+                access_selection = data[offset]
+                offset += 1
+
+            # 如果 access_selection == 1，跳过 access-selection-value
+            if access_selection == 1 and offset < len(data):
+                try:
+                    _, offset, _ = decode_data(data, offset)
+                except Exception:
+                    pass
+
+            # 解析 value (Data)
+            if offset < len(data):
+                try:
+                    val, new_offset, type_name = decode_data(data, offset)
+                    data_type = type_name
+                    value = _make_value_serializable(val)
+                    offset = new_offset
+                except Exception:
+                    pass
 
         return SetRequestAPDU(
             tag=tag,
@@ -840,23 +973,26 @@ class APDUParser:
             class_id=class_id,
             obis=obis,
             attribute_id=attribute_id,
+            access_selection=access_selection,
+            data_type=data_type,
+            value=value,
             raw_hex=bytes_to_hex(data),
         )
 
     @classmethod
     def parse_set_response(cls, data: bytes) -> SetResponseAPDU:
-        """解析SetResponse APDU (tag=0xC3)"""
+        """解析SetResponse APDU (tag=0xC5)"""
         offset = 0
         tag = data[offset]
         offset += 1
 
-        if tag != 0xC3:
+        if tag != 0xC5:
             raise ValueError(f"不是SetResponse APDU，tag={tag}")
 
         set_type = data[offset]
         offset += 1
 
-        invoke_id, offset = cls._parse_uint32(data, offset)
+        invoke_id, offset = cls._parse_invoke_id(data, offset)
 
         result_code = 0
         result_desc = "success"
@@ -879,12 +1015,12 @@ class APDUParser:
 
     @classmethod
     def parse_event_notification(cls, data: bytes) -> EventNotificationAPDU:
-        """解析EventNotification APDU (tag=0xC4)"""
+        """解析EventNotification APDU (tag=0xC2)"""
         offset = 0
         tag = data[offset]
         offset += 1
 
-        if tag != 0xC4:
+        if tag != 0xC2:
             raise ValueError(f"不是EventNotification APDU，tag={tag}")
 
         datetime_dict = None
@@ -933,18 +1069,18 @@ class APDUParser:
 
     @classmethod
     def parse_action_request(cls, data: bytes) -> ActionRequestAPDU:
-        """解析ActionRequest APDU (tag=0xC7)"""
+        """解析ActionRequest APDU (tag=0xC3)"""
         offset = 0
         tag = data[offset]
         offset += 1
 
-        if tag != 0xC7:
+        if tag != 0xC3:
             raise ValueError(f"不是ActionRequest APDU，tag={tag}")
 
         action_type = data[offset]
         offset += 1
 
-        invoke_id, offset = cls._parse_uint32(data, offset)
+        invoke_id, offset = cls._parse_invoke_id(data, offset)
 
         class_id = None
         obis = None
@@ -970,18 +1106,18 @@ class APDUParser:
 
     @classmethod
     def parse_action_response(cls, data: bytes) -> ActionResponseAPDU:
-        """解析ActionResponse APDU (tag=0xC8)"""
+        """解析ActionResponse APDU (tag=0xC7)"""
         offset = 0
         tag = data[offset]
         offset += 1
 
-        if tag != 0xC8:
+        if tag != 0xC7:
             raise ValueError(f"不是ActionResponse APDU，tag={tag}")
 
         action_type = data[offset]
         offset += 1
 
-        invoke_id, offset = cls._parse_uint32(data, offset)
+        invoke_id, offset = cls._parse_invoke_id(data, offset)
 
         result_desc = "success"
         result_code = 0
@@ -1009,6 +1145,89 @@ class APDUParser:
             result_code=result_code,
             data_type=data_type,
             value=value,
+            raw_hex=bytes_to_hex(data),
+        )
+
+    # ---------- ExceptionResponse 解析 ----------
+
+    @classmethod
+    def parse_exception_response(cls, data: bytes) -> "ExceptionResponseAPDU":
+        """
+        解析 ExceptionResponse APDU (tag=0xD8, 216)
+
+        ExceptionResponse 格式 (IEC 62056-53):
+        {
+            state-error  StateError,      (1 byte)
+            service-error  ServiceError    (1 byte)
+        }
+
+        StateError 枚举:
+        - 0: service-not-allowed
+        - 1: service-unknown
+        - 2: pacing
+        - 3: other
+
+        ServiceError 枚举 (部分):
+        - 0: operation-not-possible
+        - 1: service-not-supported
+        - 2: other
+        ...
+        """
+        offset = 0
+        tag = data[offset]
+        offset += 1
+
+        if tag != 0xD8:
+            raise ValueError(f"不是ExceptionResponse APDU，tag={tag}")
+
+        state_error = 0
+        service_error = 0
+
+        # 至少需要 tag(1) + state_error(1) + service_error(1) = 3 字节
+        if len(data) >= 3:
+            state_error = data[offset]
+            offset += 1
+            service_error = data[offset]
+            offset += 1
+        elif len(data) >= 2:
+            state_error = data[offset]
+
+        # StateError 名称映射
+        STATE_ERROR_NAMES = {
+            0: "service-not-allowed",
+            1: "service-unknown",
+            2: "pacing",
+            3: "other",
+        }
+
+        # ServiceError 名称映射（部分常见值）
+        SERVICE_ERROR_NAMES = {
+            0: "operation-not-possible",
+            1: "service-not-supported",
+            2: "other",
+            3: "parsing",
+            4: "type-unmatched",
+            5: "scope-of-access-violated",
+            6: "data-access",
+            7: "data-block-unavailable",
+            8: "long-get-aborted",
+            9: "no-long-get",
+            10: "long-set-aborted",
+            11: "no-long-set",
+            12: "data-block-number-invalid",
+        }
+
+        state_error_name = STATE_ERROR_NAMES.get(state_error, f"unknown({state_error})")
+        service_error_name = SERVICE_ERROR_NAMES.get(service_error, f"unknown({service_error})")
+
+        return ExceptionResponseAPDU(
+            tag=tag,
+            type_name="ExceptionResponse",
+            state_error=state_error,
+            state_error_name=state_error_name,
+            service_error=service_error,
+            service_error_name=service_error_name,
+            result=f"state_error={state_error_name}, service_error={service_error_name}",
             raw_hex=bytes_to_hex(data),
         )
 
@@ -1122,43 +1341,134 @@ def parse_apdu(data: bytes) -> APDUBase:
         raise ValueError("APDU数据为空")
 
     tag = data[0]
+    raw_hex = bytes_to_hex(data)
+
+    # 已知tag → 类型名称映射（用于解析失败时的降级处理）
+    _KNOWN_TAG_NAMES = {
+        0x0F: "DataNotification",
+        0xC0: "GetRequest",
+        0xC1: "SetRequest",
+        0xC2: "EventNotification",
+        0xC3: "ActionRequest",
+        0xC4: "GetResponse",
+        0xC5: "SetResponse",
+        0xC7: "ActionResponse",
+        0xD8: "ExceptionResponse",
+        0xDA: "GeneralCiphering",
+        0xDB: "GeneralGloCiphering",
+    }
 
     try:
         if tag == 0x0F:  # DataNotification
             return APDUParser.parse_data_notification(data)
         elif tag == 0xC0:  # GetRequest
             return APDUParser.parse_get_request(data)
-        elif tag == 0xC1:  # GetResponse
-            return APDUParser.parse_get_response(data)
-        elif tag == 0xC2:  # SetRequest
+        elif tag == 0xC1:  # SetRequest
             return APDUParser.parse_set_request(data)
-        elif tag == 0xC3:  # SetResponse
-            return APDUParser.parse_set_response(data)
-        elif tag == 0xC4:  # EventNotification
+        elif tag == 0xC2:  # EventNotification
             return APDUParser.parse_event_notification(data)
-        elif tag == 0xC7:  # ActionRequest
+        elif tag == 0xC3:  # ActionRequest
             return APDUParser.parse_action_request(data)
-        elif tag == 0xC8:  # ActionResponse
+        elif tag == 0xC4:  # GetResponse
+            return APDUParser.parse_get_response(data)
+        elif tag == 0xC5:  # SetResponse
+            return APDUParser.parse_set_response(data)
+        elif tag == 0xC7:  # ActionResponse
             return APDUParser.parse_action_response(data)
+        elif tag == 0xD8:  # ExceptionResponse
+            return APDUParser.parse_exception_response(data)
         elif tag == 0xDA:  # GeneralCiphering
             return APDUParser.parse_general_ciphering(data)
         elif tag == 0xDB:  # GeneralGloCiphering
             return APDUParser.parse_general_glo_ciphering(data)
         else:
-            # 未知/未实现的APDU类型
+            # 真正未知/未实现的APDU类型
             return UnknownAPDU(
                 tag=tag,
                 type_name=f"Unknown(0x{tag:02X})",
-                data_hex=bytes_to_hex(data),
-                raw_hex=bytes_to_hex(data),
+                data_hex=raw_hex,
+                raw_hex=raw_hex,
             )
     except Exception as e:
-        # 解析失败，返回未知APDU
+        # 已知tag解析失败：返回带正确类型名称的降级对象，而非Unknown
+        type_name = _KNOWN_TAG_NAMES.get(tag)
+        if type_name:
+            # 根据tag类型返回对应的APDU对象（带错误信息）
+            return _create_partial_apdu(tag, type_name, raw_hex, str(e))
+        # 未知tag解析失败
         return UnknownAPDU(
             tag=tag,
             type_name=f"Unknown(0x{tag:02X})",
-            data_hex=bytes_to_hex(data),
-            raw_hex=bytes_to_hex(data),
+            data_hex=raw_hex,
+            raw_hex=raw_hex,
+        )
+
+
+def _create_partial_apdu(tag: int, type_name: str, raw_hex: str, error_msg: str) -> APDUBase:
+    """
+    为已知tag但解析失败的APDU创建降级对象。
+    返回对应类型的APDU对象（而非UnknownAPDU），保留正确的类型名称和错误信息。
+    """
+    if tag == 0xC0:  # GetRequest
+        return GetRequestAPDU(
+            tag=tag,
+            type_name=type_name,
+            raw_hex=raw_hex,
+        )
+    elif tag == 0xC1:  # SetRequest
+        return SetRequestAPDU(
+            tag=tag,
+            type_name=type_name,
+            raw_hex=raw_hex,
+        )
+    elif tag == 0xC2:  # EventNotification
+        return EventNotificationAPDU(
+            tag=tag,
+            type_name=type_name,
+            raw_hex=raw_hex,
+        )
+    elif tag == 0xC3:  # ActionRequest
+        return ActionRequestAPDU(
+            tag=tag,
+            type_name=type_name,
+            raw_hex=raw_hex,
+        )
+    elif tag == 0xC4:  # GetResponse
+        return GetResponseAPDU(
+            tag=tag,
+            type_name=type_name,
+            result=f"parse_error: {error_msg}",
+            raw_hex=raw_hex,
+            raw_data_hex=raw_hex,
+        )
+    elif tag == 0xC5:  # SetResponse
+        return SetResponseAPDU(
+            tag=tag,
+            type_name=type_name,
+            result=f"parse_error: {error_msg}",
+            raw_hex=raw_hex,
+        )
+    elif tag == 0xC7:  # ActionResponse
+        return ActionResponseAPDU(
+            tag=tag,
+            type_name=type_name,
+            result=f"parse_error: {error_msg}",
+            raw_hex=raw_hex,
+        )
+    elif tag == 0xD8:  # ExceptionResponse
+        return ExceptionResponseAPDU(
+            tag=tag,
+            type_name=type_name,
+            result=f"parse_error: {error_msg}",
+            raw_hex=raw_hex,
+        )
+    else:
+        # 未知类型，用UnknownAPDU
+        return UnknownAPDU(
+            tag=tag,
+            type_name=f"{type_name} (parse_error: {error_msg})",
+            data_hex=raw_hex,
+            raw_hex=raw_hex,
         )
 
 
@@ -1192,8 +1502,18 @@ def build_apdu(apdu_type: str, params: dict) -> bytes:
         return build_data_notification_confirm(params)
     elif apdu_type in ("setrequest", "set-request"):
         return build_set_request(params)
+    elif apdu_type in ("setresponse", "set-response"):
+        return build_set_response(params)
+    elif apdu_type in ("actionrequest", "action-request"):
+        return build_action_request(params)
+    elif apdu_type in ("actionresponse", "action-response"):
+        return build_action_response(params)
+    elif apdu_type in ("eventnotification", "event-notification"):
+        return build_event_notification(params)
     elif apdu_type in ("generalglociphering", "general-glo-ciphering"):
         raise NotImplementedError("GeneralGloCiphering组帧在ciphering层完成")
+    elif apdu_type in ("generalciphering", "general-ciphering"):
+        raise NotImplementedError("GeneralCiphering组帧在ciphering层完成")
     else:
         raise NotImplementedError(f"暂不支持的APDU类型: {apdu_type}")
 
@@ -1228,8 +1548,8 @@ def build_get_request(params: dict) -> bytes:
     # get-type
     result += bytes([get_type])
 
-    # invoke-id-and-priority (4 bytes)
-    result += invoke_id.to_bytes(4, "big")
+    # invoke-id-and-priority (1 byte, DLMS标准)
+    result += bytes([invoke_id & 0xFF])
 
     if get_type == 1:  # normal
         # COSEM attribute descriptor
@@ -1325,13 +1645,13 @@ def build_get_response(params: dict) -> bytes:
     invoke_id = params.get("invoke_id", 0)
 
     # tag
-    result = bytes([0xC1])  # GetResponse
+    result = bytes([0xC4])  # GetResponse
 
     # get-type
     result += bytes([get_type])
 
-    # invoke-id-and-priority (4 bytes)
-    result += invoke_id.to_bytes(4, "big")
+    # invoke-id-and-priority (1 byte, DLMS标准)
+    result += bytes([invoke_id & 0xFF])
 
     if get_type == 1:  # normal
         result_code = params.get("result_code", 0)
@@ -1527,13 +1847,13 @@ def build_data_notification_confirm(params: dict) -> bytes:
 
     这里实现几种可能的确认方式:
 
-    方式1 - EventNotification形式 (tag=0xC4):
+    方式1 - EventNotification形式 (tag=0xC2):
       使用EventNotification作为确认响应，发送方发送一个事件表示已收到通知。
 
     方式2 - 简单ACK帧 (自定义):
       一个极简的确认帧，包含invoke_id和结果码。
 
-    方式3 - 使用ActionResponse (tag=0xC8):
+    方式3 - 使用ActionResponse (tag=0xC7):
       如果通知是通过Action触发的，用ActionResponse确认。
 
     默认使用方式1（EventNotification形式）。
@@ -1558,14 +1878,14 @@ def build_data_notification_confirm(params: dict) -> bytes:
 
     if confirm_type == "event":
         # 方式1: 使用EventNotification作为确认
-        # EventNotification格式: tag(0xC4) + time(optional) + cosem_attr_desc + value
+        # EventNotification格式: tag(0xC2) + time(optional) + cosem_attr_desc + value
         class_id = params.get("class_id", 0)
         obis_val = params.get("obis", "0-0:0.0.0.0")
         attribute_id = params.get("attribute_id", 2)
         value = params.get("value", result_code)
         data_type = params.get("data_type", "unsigned")
 
-        result = bytes([0xC4])  # EventNotification tag
+        result = bytes([0xC2])  # EventNotification tag
 
         # 不含time字段
         # cosem_attribute_descriptor (裸9字节，无BER tag)
@@ -1594,7 +1914,7 @@ def build_data_notification_confirm(params: dict) -> bytes:
     elif confirm_type == "action":
         # 方式3: ActionResponse形式
         action_type = params.get("action_type", 1)
-        result = bytes([0xC8])  # ActionResponse tag
+        result = bytes([0xC7])  # ActionResponse tag
         result += bytes([action_type])
         result += invoke_id.to_bytes(4, "big")
         result += bytes([result_code])  # result (0=success)
@@ -1635,14 +1955,15 @@ def build_set_request(params: dict) -> bytes:
     set_type = params.get("set_type", 1)
     invoke_id = params.get("invoke_id", 0)
 
-    result = bytes([0xC2])  # SetRequest
+    result = bytes([0xC1])  # SetRequest
     result += bytes([set_type])
-    result += invoke_id.to_bytes(4, "big")
+    result += bytes([invoke_id & 0xFF])  # invoke-id-and-priority (1 byte, DLMS标准)
 
     if set_type == 1:  # normal
         class_id = params.get("class_id", 0)
         obis_val = params.get("obis", "0-0:0.0.0.0")
         attribute_id = params.get("attribute_id", 2)
+        access_selection = params.get("access_selection", 0)
         value = params.get("value")
         data_type = params.get("data_type")
 
@@ -1654,8 +1975,13 @@ def build_set_request(params: dict) -> bytes:
             result += obis_str_to_bytes(obis_val)
         result += bytes([attribute_id])
 
-        # access-selection (1 byte)
-        result += bytes([0])
+        # access-selection
+        result += bytes([access_selection])
+        # 如果有 access-selection 参数，编码选择值
+        if access_selection != 0:
+            access_params = params.get("access_selection_params")
+            if access_params is not None:
+                result += encode_data(access_params)
 
         # value
         if data_type:
@@ -1664,5 +1990,176 @@ def build_set_request(params: dict) -> bytes:
             result += encode_data(value)
         else:
             result += encode_data(None, "null-data")
+
+    return result
+
+
+# ---------- SetResponse 构建 ----------
+
+def build_set_response(params: dict) -> bytes:
+    """
+    构建SetResponse APDU (tag=0xC5)
+
+    Args:
+        params: 参数字典:
+            - set_type: 1=normal (默认1)
+            - invoke_id: 调用ID (默认0)
+            - result_code: 结果码 (0=成功, 其他=错误码, 默认0)
+
+    Returns:
+        bytes: SetResponse APDU数据
+    """
+    set_type = params.get("set_type", 1)
+    invoke_id = params.get("invoke_id", 0)
+    result_code = params.get("result_code", 0)
+
+    result = bytes([0xC5])  # SetResponse
+    result += bytes([set_type])
+    result += bytes([invoke_id & 0xFF])  # invoke-id-and-priority (1 byte, DLMS标准)
+    result += bytes([result_code])
+
+    return result
+
+
+# ---------- ActionRequest 构建 ----------
+
+def build_action_request(params: dict) -> bytes:
+    """
+    构建ActionRequest APDU (tag=0xC3)
+
+    Args:
+        params: 参数字典:
+            - action_type: 1=normal (默认1)
+            - invoke_id: 调用ID (默认0)
+            - class_id: 类ID
+            - obis: OBIS码
+            - method_id: 方法ID
+            - value: 方法参数 (可选)
+            - data_type: 参数数据类型 (可选)
+
+    Returns:
+        bytes: ActionRequest APDU数据
+    """
+    action_type = params.get("action_type", 1)
+    invoke_id = params.get("invoke_id", 0)
+
+    result = bytes([0xC3])  # ActionRequest
+    result += bytes([action_type])
+    result += bytes([invoke_id & 0xFF])  # invoke-id-and-priority (1 byte, DLMS标准)
+
+    if action_type == 1:  # normal
+        class_id = params.get("class_id", 0)
+        obis_val = params.get("obis", "0-0:0.0.0.0")
+        method_id = params.get("method_id", 1)
+        value = params.get("value")
+        data_type = params.get("data_type")
+
+        # cosem-method-descriptor (9 bytes: class_id(2) + obis(6) + method_id(1))
+        result += class_id.to_bytes(2, "big")
+        if isinstance(obis_val, (bytes, bytearray)):
+            result += bytes(obis_val)
+        else:
+            result += obis_str_to_bytes(obis_val)
+        result += bytes([method_id])
+
+        # method-invocation-parameters (可选)
+        if value is not None:
+            if data_type:
+                result += encode_data(value, data_type)
+            else:
+                result += encode_data(value)
+
+    return result
+
+
+# ---------- ActionResponse 构建 ----------
+
+def build_action_response(params: dict) -> bytes:
+    """
+    构建ActionResponse APDU (tag=0xC7)
+
+    Args:
+        params: 参数字典:
+            - action_type: 1=normal (默认1)
+            - invoke_id: 调用ID (默认0)
+            - result_code: 结果码 (0=成功, 其他=错误码, 默认0)
+            - value: 返回数据 (可选, result_code=0时)
+            - data_type: 返回数据类型 (可选)
+
+    Returns:
+        bytes: ActionResponse APDU数据
+    """
+    action_type = params.get("action_type", 1)
+    invoke_id = params.get("invoke_id", 0)
+    result_code = params.get("result_code", 0)
+
+    result = bytes([0xC7])  # ActionResponse
+    result += bytes([action_type])
+    result += bytes([invoke_id & 0xFF])  # invoke-id-and-priority (1 byte, DLMS标准)
+    result += bytes([result_code])
+
+    # 成功时可选的返回数据
+    if result_code == 0:
+        value = params.get("value")
+        data_type = params.get("data_type")
+        if value is not None:
+            if data_type:
+                result += encode_data(value, data_type)
+            else:
+                result += encode_data(value)
+
+    return result
+
+
+# ---------- EventNotification 构建 ----------
+
+def build_event_notification(params: dict) -> bytes:
+    """
+    构建EventNotification APDU (tag=0xC2)
+
+    Args:
+        params: 参数字典:
+            - datetime: 可选，日期时间dict或bytes
+            - class_id: 类ID
+            - obis: OBIS码
+            - attribute_id: 属性ID
+            - value: 事件值
+            - data_type: 值数据类型 (可选)
+
+    Returns:
+        bytes: EventNotification APDU数据
+    """
+    result = bytes([0xC2])  # EventNotification
+
+    # 可选的time字段 (date-time)
+    dt = params.get("datetime")
+    if dt is not None:
+        if isinstance(dt, dict):
+            result += encode_data(dt, "date-time")
+        elif isinstance(dt, (bytes, bytearray)):
+            # A-XDR: tag + 12 bytes value (无长度字节)
+            result += bytes([0x19]) + bytes(dt)
+
+    # cosem-attribute-descriptor (9 bytes)
+    class_id = params.get("class_id", 0)
+    obis_val = params.get("obis", "0-0:0.0.0.0")
+    attribute_id = params.get("attribute_id", 2)
+
+    result += class_id.to_bytes(2, "big")
+    if isinstance(obis_val, (bytes, bytearray)):
+        result += bytes(obis_val)
+    else:
+        result += obis_str_to_bytes(obis_val)
+    result += bytes([attribute_id])
+
+    # value (Data)
+    value = params.get("value")
+    data_type = params.get("data_type")
+    if data_type:
+        result += encode_data(value, data_type)
+    elif value is not None:
+        result += encode_data(value)
+    else:
+        result += encode_data(None, "null-data")
 
     return result

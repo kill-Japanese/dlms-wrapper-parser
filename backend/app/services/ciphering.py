@@ -679,10 +679,27 @@ def build_ciphered(
     # 调用计数器（4字节，大端序）
     ic_bytes = invocation_counter.to_bytes(4, "big")
 
+    # 如果需要压缩，先对 APDU 数据进行 V.44 压缩
+    # 打包流程: APDU -> V.44压缩 -> AES-GCM加密 -> General-Glo-Ciphering封装
+    # 解包流程: General-Glo-Ciphering解密 -> V.44解压 -> APDU
+    plaintext_to_encrypt = apdu
+    if compressed:
+        try:
+            from app.services.compression import compress as v44_compress, V44_AVAILABLE
+            if not V44_AVAILABLE:
+                raise CipheringError("V.44压缩模块不可用，无法压缩")
+            compressed_data = v44_compress(apdu)
+            print(f"[CIPHER DEBUG] V.44压缩: {len(apdu)} -> {len(compressed_data)} 字节")
+            plaintext_to_encrypt = compressed_data
+        except CipheringError:
+            raise
+        except Exception as e:
+            raise CipheringError(f"V.44压缩失败: {e}")
+
     # 构建 ciphered-service 的内容
     if not encrypted and not authenticated:
-        # 不加密也不认证，直接附加明文
-        cs_content = bytes([sc_byte]) + ic_bytes + apdu
+        # 不加密也不认证，直接附加明文（可能已压缩）
+        cs_content = bytes([sc_byte]) + ic_bytes + plaintext_to_encrypt
     else:
         # 使用AES-GCM加密（12字节tag，符合DLMS Suite 1规范）
         if active_key is None:
@@ -698,7 +715,8 @@ def build_ciphered(
         aad = bytes([sc_byte])
 
         # 加密并生成12字节认证标签（DLMS Suite 1标准）
-        ciphertext, tag = _aes_gcm_encrypt(gcm_key, nonce, apdu, aad, tag_length=12)
+        # 注意: 当 compressed=True 时，加密的是压缩后的数据
+        ciphertext, tag = _aes_gcm_encrypt(gcm_key, nonce, plaintext_to_encrypt, aad, tag_length=12)
 
         # 构建 ciphered-service 内容
         # SC(1) + IC(4) + ciphertext + tag(12)

@@ -844,6 +844,122 @@ class DataModelManager:
 
         return None
 
+    def match_by_class(self, class_id: int, attribute_id: int = 0) -> Optional[CosemObject]:
+        """
+        按class_id进行回退匹配（当OBIS精确匹配失败时使用）。
+
+        返回数据模型中同class_id、同attribute_id的第一个对象，
+        用于获取类名和属性名，即使OBIS码不完全一致。
+
+        Args:
+            class_id: 类ID
+            attribute_id: 属性ID (0表示匹配对象本身)
+
+        Returns:
+            匹配到的CosemObject，未找到返回None
+        """
+        if not self._loaded:
+            return None
+
+        objs = self._by_class.get(class_id, [])
+        for obj in objs:
+            if obj.attribute_id == attribute_id:
+                return obj
+        # 如果指定attribute_id没找到，尝试attribute_id=0（对象本身）
+        if attribute_id != 0:
+            for obj in objs:
+                if obj.attribute_id == 0:
+                    return obj
+        return None
+
+    def get_class_name(self, class_id: int) -> str:
+        """
+        获取class_id对应的COSEM类名（标准名称）。
+
+        Args:
+            class_id: 类ID
+
+        Returns:
+            类名字符串
+        """
+        _CLASS_NAMES = {
+            0: "Association",
+            1: "Data",
+            2: "Register",
+            3: "Register (Extended)",
+            4: "Extended Register",
+            5: "Demand Register",
+            6: "Register Activation",
+            7: "Profile Generic",
+            8: "Clock",
+            9: "Script Table",
+            10: "Schedule",
+            11: "Special Days Table",
+            12: "Activity Calendar",
+            13: "Register Monitor",
+            14: "Single Action Schedule",
+            15: "Association (Ver 1)",
+            16: "SAP Assignment",
+            17: "Logical Device (Ver 1)",
+            18: "Logical Device (Ver 0)",
+            19: "Auto Answer",
+            20: "Auto Connect",
+            21: "Activity Calendar (Ver 1)",
+            22: "Monitor",
+            23: "IEC Local Port Setup",
+            24: "IEC HDLC Setup",
+            25: "IEC Optical Port Setup",
+            26: "IEC Twisted Pair Setup",
+            27: "IEC MBus Port Setup",
+            28: "ZigBee Network Control",
+            29: "ZigBee Device Profile",
+            30: "Wireless Mode QKD",
+            40: "Push Setup",
+            41: "Data Protection",
+            42: "Wireless Mode QKD (Ver 1)",
+            43: "Credit Amount",
+            44: "Account",
+            45: "Account Status",
+            50: "SAP Assignment (Ver 1)",
+            51: "Image Transfer",
+            52: "Iec8802LlcType1Setup",
+            53: "Iec8802LlcType2Setup",
+            54: "Iec8802LlcType3Setup",
+            55: "PlcIpIpv4Setup",
+            56: "PlcIpIpv6Setup",
+            57: "PlcMacSetup",
+            58: "PlcType1Setup",
+            59: "G3PlcMacLayerCapabilities",
+            60: "G3PlcMacSetup",
+            61: "G3Plc6LoWPAN",
+            62: "G3PlcAdpLayerCapabilities",
+            63: "G3PlcAdpSetup",
+            64: "Disconnect Control",
+            65: "Limitder",
+            66: "ModemConfiguration",
+            67: "ZigBeeSas",
+            68: "ZigBeeNetworkManagement",
+            69: "ZigBeeDeviceManagement",
+            70: "WirelessMode",
+            71: "MBus Slave Port Setup",
+            72: "Disconnect Control (Ver 1)",
+            73: "DataProtection (Ver 1)",
+            74: "FunctionControl",
+            75: "ArrayManager",
+            76: "CommFunctionList",
+            77: "MBus Master Port Setup",
+            78: "G3PlcAdpRoutingTable",
+            79: "G3PlcAdpRoute",
+            80: "G3PlcMacRoutingTable",
+            81: "G3PlcMacRoute",
+            82: "PPP Setup",
+            83: "MBusClient",
+            84: "GsmDiagnostic",
+            85: "LteDiagnostic",
+            100: "Security Setup",
+        }
+        return _CLASS_NAMES.get(class_id, f"Class {class_id}")
+
     def get_object_list(self, class_id: Optional[int] = None,
                         limit: int = 100, offset: int = 0) -> List[CosemObject]:
         """

@@ -71,6 +71,82 @@ DATA_TYPE_NAMES["float"] = 0x17
 DATA_TYPE_NAMES["no-data"] = 0xff
 DATA_TYPE_NAMES["null"] = 0xff
 
+# 定长类型及其字节大小（A-XDR 编码中不带长度字节）
+FIXED_TYPE_SIZES = {
+    0x03: 1,   # boolean
+    0x05: 4,   # double-long (int32)
+    0x06: 4,   # double-long-unsigned (uint32)
+    0x0f: 1,   # integer (int8)
+    0x10: 2,   # long (int16)
+    0x11: 1,   # unsigned (uint8)
+    0x12: 2,   # long-unsigned (uint16)
+    0x14: 8,   # long64 (int64)
+    0x15: 8,   # long64-unsigned (uint64)
+    0x16: 1,   # enum
+    0x17: 4,   # float32
+    0x18: 8,   # float64
+    0x19: 12,  # date-time
+    0x1a: 5,   # date
+    0x1b: 4,   # time
+}
+
+
+def _extract_value_from_encoded(encoded: bytes) -> bytes:
+    """
+    从编码后的数据元素中提取值部分（去掉tag和可选的length）。
+    A-XDR 编码中定长类型没有length字节。
+    """
+    if not encoded:
+        return b""
+    tag = encoded[0]
+    fixed_size = FIXED_TYPE_SIZES.get(tag)
+    if fixed_size is not None:
+        return encoded[1:1 + fixed_size]
+    else:
+        length, pos = _decode_length(encoded, 1)
+        return encoded[pos:pos + length]
+
+
+def _is_valid_data_tag(b: int) -> bool:
+    """检查字节是否是有效的DLMS数据类型标签"""
+    return b in DATA_TYPES
+
+
+def _decode_fixed_value(data: bytes, offset: int, size: int, signed: bool, type_name: str) -> Tuple[Any, int]:
+    """
+    解码定长类型值（A-XDR 编码：无长度字节，直接读取 size 字节）。
+    同时兼容旧 BER 编码：当 data[offset]==size 且 A-XDR 解析后偏移越界时回退到 BER。
+
+    Args:
+        data: 字节数据
+        offset: 当前偏移量（tag之后的第一个字节）
+        size: 期望的字节长度
+        signed: 是否有符号
+        type_name: 类型名称（用于错误信息）
+
+    Returns:
+        (value, new_offset)
+    """
+    if offset >= len(data):
+        raise ValueError(f"{type_name} 数据不足，offset={offset}")
+
+    # A-XDR: 直接读取 size 字节（无长度字节）
+    if offset + size <= len(data):
+        val = int.from_bytes(data[offset:offset + size], "big", signed=signed)
+        return val, offset + size
+
+    # BER 回退: 如果数据不足 A-XDR 但可能是 BER 格式（有长度字节）
+    # 尝试读取长度字节
+    try:
+        length, ber_offset = _decode_length(data, offset)
+        if length == size and ber_offset + size <= len(data):
+            val = int.from_bytes(data[ber_offset:ber_offset + size], "big", signed=signed)
+            return val, ber_offset + size
+    except Exception:
+        pass
+
+    raise ValueError(f"{type_name} 数据不足，需要{size}字节，实际只有{len(data) - offset}字节")
+
 
 def _decode_length(data: bytes, offset: int) -> Tuple[int, int]:
     """
@@ -336,23 +412,25 @@ def decode_data(data: bytes, offset: int = 0, data_type: Optional[int] = None) -
         return None, offset, type_name
 
     elif tag in (0x01, 0x02):  # array / structure
-        length, offset = _decode_length(data, offset)
-        end_offset = offset + length
+        # DLMS A-XDR: 长度字段表示元素个数（不是字节数）
+        count, offset = _decode_length(data, offset)
         items = []
-        while offset < end_offset:
-            item_value, offset, _ = decode_data(data, offset)
-            items.append(item_value)
-        if offset != end_offset:
-            raise ValueError(f"{type_name} 长度不匹配: 预期{end_offset}, 实际{offset}")
+        for _ in range(count):
+            if offset >= len(data):
+                break
+            try:
+                item_value, offset, _ = decode_data(data, offset)
+                items.append(item_value)
+            except Exception:
+                break
         return items, offset, type_name
 
     elif tag == 0x03:  # boolean
-        length, offset = _decode_length(data, offset)
-        if length == 0:
-            return False, offset, type_name
+        # A-XDR: 1 byte value, no length byte
+        if offset >= len(data):
+            raise ValueError(f"boolean 数据不足，offset={offset}")
         val = data[offset] != 0
-        offset += length
-        return val, offset, type_name
+        return val, offset + 1, type_name
 
     elif tag == 0x04:  # bit-string
         length, offset = _decode_length(data, offset)
@@ -367,23 +445,11 @@ def decode_data(data: bytes, offset: int = 0, data_type: Optional[int] = None) -
         return {"bit_count": total_bits, "bytes": bit_bytes, "unused_bits": unused_bits}, offset, type_name
 
     elif tag == 0x05:  # double-long (int32)
-        length, offset = _decode_length(data, offset)
-        if length != 4:
-            raise ValueError(f"double-long 长度应为4，实际: {length}")
-        if offset + 4 > len(data):
-            raise ValueError(f"double-long 数据不足，需要4字节，实际只有{len(data) - offset}字节")
-        val = int.from_bytes(data[offset:offset + 4], "big", signed=True)
-        offset += 4
+        val, offset = _decode_fixed_value(data, offset, 4, signed=True, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x06:  # double-long-unsigned (uint32)
-        length, offset = _decode_length(data, offset)
-        if length != 4:
-            raise ValueError(f"double-long-unsigned 长度应为4，实际: {length}")
-        if offset + 4 > len(data):
-            raise ValueError(f"double-long-unsigned 数据不足，需要4字节，实际只有{len(data) - offset}字节")
-        val = int.from_bytes(data[offset:offset + 4], "big", signed=False)
-        offset += 4
+        val, offset = _decode_fixed_value(data, offset, 4, signed=False, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x09:  # octet-string
@@ -411,35 +477,19 @@ def decode_data(data: bytes, offset: int = 0, data_type: Optional[int] = None) -
         return val, offset, type_name
 
     elif tag == 0x0f:  # integer (int8)
-        length, offset = _decode_length(data, offset)
-        if length != 1:
-            raise ValueError(f"integer 长度应为1，实际: {length}")
-        val = int.from_bytes(data[offset:offset + 1], "big", signed=True)
-        offset += 1
+        val, offset = _decode_fixed_value(data, offset, 1, signed=True, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x10:  # long (int16)
-        length, offset = _decode_length(data, offset)
-        if length != 2:
-            raise ValueError(f"long 长度应为2，实际: {length}")
-        val = int.from_bytes(data[offset:offset + 2], "big", signed=True)
-        offset += 2
+        val, offset = _decode_fixed_value(data, offset, 2, signed=True, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x11:  # unsigned (uint8)
-        length, offset = _decode_length(data, offset)
-        if length != 1:
-            raise ValueError(f"unsigned 长度应为1，实际: {length}")
-        val = int.from_bytes(data[offset:offset + 1], "big", signed=False)
-        offset += 1
+        val, offset = _decode_fixed_value(data, offset, 1, signed=False, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x12:  # long-unsigned (uint16)
-        length, offset = _decode_length(data, offset)
-        if length != 2:
-            raise ValueError(f"long-unsigned 长度应为2，实际: {length}")
-        val = int.from_bytes(data[offset:offset + 2], "big", signed=False)
-        offset += 2
+        val, offset = _decode_fixed_value(data, offset, 2, signed=False, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x13:  # compact-array
@@ -469,58 +519,62 @@ def decode_data(data: bytes, offset: int = 0, data_type: Optional[int] = None) -
         return {"description": desc_value, "count": item_count, "items": items}, offset, type_name
 
     elif tag == 0x14:  # long64 (int64)
-        length, offset = _decode_length(data, offset)
-        if length != 8:
-            raise ValueError(f"long64 长度应为8，实际: {length}")
-        val = int.from_bytes(data[offset:offset + 8], "big", signed=True)
-        offset += 8
+        val, offset = _decode_fixed_value(data, offset, 8, signed=True, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x15:  # long64-unsigned (uint64)
-        length, offset = _decode_length(data, offset)
-        if length != 8:
-            raise ValueError(f"long64-unsigned 长度应为8，实际: {length}")
-        val = int.from_bytes(data[offset:offset + 8], "big", signed=False)
-        offset += 8
+        val, offset = _decode_fixed_value(data, offset, 8, signed=False, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x16:  # enum
-        length, offset = _decode_length(data, offset)
-        if length != 1:
-            raise ValueError(f"enum 长度应为1，实际: {length}")
-        val = data[offset]
-        offset += 1
+        val, offset = _decode_fixed_value(data, offset, 1, signed=False, type_name=type_name)
         return val, offset, type_name
 
     elif tag == 0x17:  # float32
-        length, offset = _decode_length(data, offset)
-        if length != 4:
-            raise ValueError(f"float32 长度应为4，实际: {length}")
+        # A-XDR: 4 bytes, no length byte
+        if offset + 4 > len(data):
+            raise ValueError(f"float32 数据不足，需要4字节")
         val = struct.unpack(">f", data[offset:offset + 4])[0]
-        offset += 4
-        return val, offset, type_name
+        return val, offset + 4, type_name
 
     elif tag == 0x18:  # float64 (double)
-        length, offset = _decode_length(data, offset)
-        if length != 8:
-            raise ValueError(f"float64 长度应为8，实际: {length}")
+        # A-XDR: 8 bytes, no length byte
+        if offset + 8 > len(data):
+            raise ValueError(f"float64 数据不足，需要8字节")
         val = struct.unpack(">d", data[offset:offset + 8])[0]
-        offset += 8
-        return val, offset, type_name
+        return val, offset + 8, type_name
 
     elif tag == 0x19:  # date-time
+        # A-XDR: 12 bytes, no length byte
+        dt_size = 12
+        if offset + dt_size <= len(data):
+            dt_bytes = data[offset:offset + dt_size]
+            return _decode_date_time(dt_bytes, dt_size), offset + dt_size, type_name
+        # BER fallback
         length, offset = _decode_length(data, offset)
         dt_bytes = data[offset:offset + length]
         offset += length
         return _decode_date_time(dt_bytes, length), offset, type_name
 
     elif tag == 0x1a:  # date
+        # A-XDR: 5 bytes, no length byte
+        d_size = 5
+        if offset + d_size <= len(data):
+            d_bytes = data[offset:offset + d_size]
+            return _decode_date(d_bytes, d_size), offset + d_size, type_name
+        # BER fallback
         length, offset = _decode_length(data, offset)
         d_bytes = data[offset:offset + length]
         offset += length
         return _decode_date(d_bytes, length), offset, type_name
 
     elif tag == 0x1b:  # time
+        # A-XDR: 4 bytes, no length byte
+        t_size = 4
+        if offset + t_size <= len(data):
+            t_bytes = data[offset:offset + t_size]
+            return _decode_time(t_bytes, t_size), offset + t_size, type_name
+        # BER fallback
         length, offset = _decode_length(data, offset)
         t_bytes = data[offset:offset + length]
         offset += length
@@ -668,7 +722,7 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
     # boolean
     elif tag == 0x03:
         val = 1 if value else 0
-        return bytes([tag, 1, val])
+        return bytes([tag, val])
 
     # bit-string
     elif tag == 0x04:
@@ -687,12 +741,12 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
     # double-long (int32)
     elif tag == 0x05:
         val = int(value).to_bytes(4, "big", signed=True)
-        return bytes([tag]) + _encode_length(4) + val
+        return bytes([tag]) + val
 
     # double-long-unsigned (uint32)
     elif tag == 0x06:
         val = int(value).to_bytes(4, "big", signed=False)
-        return bytes([tag]) + _encode_length(4) + val
+        return bytes([tag]) + val
 
     # octet-string
     elif tag == 0x09:
@@ -715,22 +769,22 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
     # integer (int8)
     elif tag == 0x0f:
         val = int(value).to_bytes(1, "big", signed=True)
-        return bytes([tag, 1]) + val
+        return bytes([tag]) + val
 
     # long (int16)
     elif tag == 0x10:
         val = int(value).to_bytes(2, "big", signed=True)
-        return bytes([tag, 2]) + val
+        return bytes([tag]) + val
 
     # unsigned (uint8)
     elif tag == 0x11:
         val = int(value).to_bytes(1, "big", signed=False)
-        return bytes([tag, 1]) + val
+        return bytes([tag]) + val
 
     # long-unsigned (uint16)
     elif tag == 0x12:
         val = int(value).to_bytes(2, "big", signed=False)
-        return bytes([tag, 2]) + val
+        return bytes([tag]) + val
 
     # compact-array
     elif tag == 0x13:
@@ -771,29 +825,17 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
         items_bytes = b""
         for item in items:
             if isinstance(item, (list, tuple)):
-                # 结构元素，编码每个字段（去掉tag和length）
+                # 结构元素，编码每个字段（去掉tag和可选length，只保留value部分）
                 for i, field_val in enumerate(item):
                     field_tag = desc[i] if i < len(desc) else None
                     if field_tag:
                         encoded = encode_data(field_val, field_tag)
-                        # 去掉tag和length，只保留value部分
-                        # 找到value起始位置
-                        t = encoded[0]
-                        # 跳过tag
-                        pos = 1
-                        # 跳过length
-                        l, new_pos = _decode_length(encoded, pos)
-                        pos = new_pos
-                        items_bytes += encoded[pos:pos + l]
+                        items_bytes += _extract_value_from_encoded(encoded)
             else:
                 # 简单类型
                 if desc and isinstance(desc[0], int):
                     encoded = encode_data(item, desc[0])
-                    t = encoded[0]
-                    pos = 1
-                    l, new_pos = _decode_length(encoded, pos)
-                    pos = new_pos
-                    items_bytes += encoded[pos:pos + l]
+                    items_bytes += _extract_value_from_encoded(encoded)
                 else:
                     encoded = encode_data(item)
                     items_bytes += encoded
@@ -805,27 +847,27 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
     # long64 (int64)
     elif tag == 0x14:
         val = int(value).to_bytes(8, "big", signed=True)
-        return bytes([tag, 8]) + val
+        return bytes([tag]) + val
 
     # long64-unsigned (uint64)
     elif tag == 0x15:
         val = int(value).to_bytes(8, "big", signed=False)
-        return bytes([tag, 8]) + val
+        return bytes([tag]) + val
 
     # enum
     elif tag == 0x16:
         val = int(value) & 0xFF
-        return bytes([tag, 1, val])
+        return bytes([tag, val])
 
     # float32
     elif tag == 0x17:
         val = struct.pack(">f", float(value))
-        return bytes([tag]) + _encode_length(4) + val
+        return bytes([tag]) + val
 
     # float64
     elif tag == 0x18:
         val = struct.pack(">d", float(value))
-        return bytes([tag]) + _encode_length(8) + val
+        return bytes([tag]) + val
 
     # date-time
     elif tag == 0x19:
@@ -835,7 +877,7 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
             dt_bytes = bytes(value)
         else:
             dt_bytes = bytes(12)
-        return bytes([tag]) + _encode_length(len(dt_bytes)) + dt_bytes
+        return bytes([tag]) + dt_bytes
 
     # date
     elif tag == 0x1a:
@@ -845,7 +887,7 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
             d_bytes = bytes(value)
         else:
             d_bytes = bytes(5)
-        return bytes([tag]) + _encode_length(len(d_bytes)) + d_bytes
+        return bytes([tag]) + d_bytes
 
     # time
     elif tag == 0x1b:
@@ -855,7 +897,7 @@ def _encode_by_tag(value: Any, tag: int, type_name: str) -> bytes:
             t_bytes = bytes(value)
         else:
             t_bytes = bytes(4)
-        return bytes([tag]) + _encode_length(len(t_bytes)) + t_bytes
+        return bytes([tag]) + t_bytes
 
     # array / structure
     elif tag in (0x01, 0x02):

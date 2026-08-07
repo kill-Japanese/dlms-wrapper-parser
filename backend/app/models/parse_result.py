@@ -86,11 +86,12 @@ class BuildRequest(BaseModel):
     - encryption_key: 兼容别名，映射到 guek
     """
 
-    apdu_type: str = Field(description="APDU类型")
+    apdu_type: str = Field(default="", description="APDU类型（当提供raw_apdu_hex时可留空）")
     params: dict = Field(default_factory=dict, description="APDU参数")
     src_wport: int = Field(default=1, description="源WPort")
     dst_wport: int = Field(default=16, description="目的WPort")
     encrypt: bool = Field(default=False, description="是否加密")
+    compress: bool = Field(default=False, description="是否V.44压缩（加密前压缩，SC置位bit7）")
     encryption_key: Optional[str] = Field(default=None, description="加密密钥（兼容别名，映射到guek）")
     guek: Optional[str] = Field(default=None, description="Global Unicast Encryption Key - 全局单播加密密钥（十六进制）")
     gubk: Optional[str] = Field(default=None, description="Global Unicast Broadcast Key - 广播密钥（十六进制）")
@@ -99,6 +100,7 @@ class BuildRequest(BaseModel):
     system_title: Optional[str] = Field(default=None, description="系统标题（十六进制）")
     invocation_counter: Optional[int] = Field(default=1, description="调用计数器")
     key_id: int = Field(default=0, description="密钥标识 (0=unicast/GUEK, 1=broadcast/GUBK, 2=system)")
+    raw_apdu_hex: Optional[str] = Field(default=None, description="原始APDU十六进制数据（提供时跳过APDU构建，直接打包）")
 
     def get_effective_guek(self) -> Optional[str]:
         """获取有效的GUEK密钥（优先使用guek字段，兼容encryption_key）"""

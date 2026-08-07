@@ -30,7 +30,18 @@ def hex_to_bytes(hex_str: str) -> bytes:
 
     # 检查长度是否为偶数
     if len(cleaned) % 2 != 0:
-        raise ValueError(f"十六进制字符串长度必须为偶数，当前长度: {len(cleaned)}")
+        # 尝试容错：在末尾补"0"（最常见的截断情况）
+        # 同时也尝试在开头补"0"，选择能成功解析的那个
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"十六进制字符串长度为奇数({len(cleaned)})，尝试自动补齐")
+
+        # 尝试末尾补0
+        try_padded_end = cleaned + "0"
+        if re.match(r"^[0-9a-fA-F]*$", try_padded_end):
+            cleaned = try_padded_end
+        else:
+            raise ValueError(f"十六进制字符串长度必须为偶数，当前长度: {len(cleaned)}")
 
     # 检查是否为有效十六进制
     if not re.match(r"^[0-9a-fA-F]*$", cleaned):

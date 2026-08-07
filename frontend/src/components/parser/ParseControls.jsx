@@ -7,7 +7,7 @@ import {
 } from '@ant-design/icons'
 import useParserStore from '../../store/parserStore.js'
 import useLogStore from '../../store/logStore.js'
-import { parseHex, buildFrame } from '../../services/parser.js'
+import { parseHex, buildFrame, packageApdu } from '../../services/parser.js'
 
 function ParseControls() {
   const {
@@ -26,20 +26,20 @@ function ParseControls() {
 
   const { addParseLog, setParseLogs } = useLogStore()
 
-  // 检查解析结果是否有效（至少 wrapper 层解析成功）
+  // 检查解析结果是否有效（至少 wrapper 层或 APDU 层解析成功）
   const hasValidParseResult = (result) => {
     if (!result || typeof result !== 'object') {
       return false
     }
-    // wrapper 层是最基础的，如果连 wrapper 都没有，说明解析完全失败
-    if (!result.wrapper) {
-      return false
+    // wrapper 层有效
+    if (result.wrapper && typeof result.wrapper === 'object' && Object.keys(result.wrapper).length > 0) {
+      return true
     }
-    // wrapper 是空对象也不行
-    if (typeof result.wrapper === 'object' && Object.keys(result.wrapper).length === 0) {
-      return false
+    // 或者 APDU 层有效（直接解析原始APDU，无Wrapper）
+    if (result.apdu && typeof result.apdu === 'object' && Object.keys(result.apdu).length > 0) {
+      return true
     }
-    return true
+    return false
   }
 
   // 获取解析错误详情
@@ -57,8 +57,8 @@ function ParseControls() {
     if (result.errors && result.errors.length > 0) {
       return result.errors.join('; ')
     }
-    if (!result.wrapper) {
-      return '无法解析帧格式：Wrapper 层解析失败'
+    if (!result.wrapper && !result.apdu) {
+      return '无法解析帧格式：未检测到有效的 Wrapper 帧或 APDU 数据'
     }
     return '解析失败：未识别的帧格式'
   }
@@ -184,29 +184,68 @@ function ParseControls() {
 
     setLoading(true)
     try {
-      // 调用后端组帧API
-      const result = await buildFrame(
-        'DataNotification',
-        {},
-        {
-          srcWPort: 1,
-          dstWPort: 16,
-          encrypt: securityConfig.useCiphering,
+      // 判断输入是否为原始APDU hex数据（以已知APDU tag开头）
+      // 按IEC 62056-6 / Gurux标准:
+      // GetRequest=0xC0, SetRequest=0xC1, EventNotification=0xC2, ActionRequest=0xC3,
+      // GetResponse=0xC4, SetResponse=0xC5, ActionResponse=0xC7,
+      // DataNotification=0x0F
+      const hexStr = rawHex.trim().replace(/\s/g, '')
+      const firstByte = parseInt(hexStr.substring(0, 2), 16)
+      const isRawApdu = [0x0F, 0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC7].includes(firstByte)
+
+      let result
+      if (isRawApdu) {
+        // 原始APDU打包：V.44压缩 + AES-GCM加密 + Wrapper封装
+        const needsEncryption = securityConfig.useCiphering
+        const needsCompression = securityConfig.useCompression
+
+        if (needsEncryption && !securityConfig.systemTitle) {
+          message.error('加密打包需要提供系统标题(System Title)')
+          setLoading(false)
+          return
+        }
+
+        result = await packageApdu(hexStr, {
+          compress: needsCompression,
+          encrypt: needsEncryption,
+          systemTitle: securityConfig.systemTitle || '0000000000000000',
           guek: securityConfig.guek,
           gubk: securityConfig.gubk,
           ak: securityConfig.ak,
-          kek: securityConfig.kek,
-          systemTitle: securityConfig.systemTitle,
           invocationCounter: securityConfig.invocationCounter,
-          keyId: securityConfig.selectedKeyType === 'gubk' ? 1 : 0
-        }
-      )
+          keyId: securityConfig.selectedKeyType === 'gubk' ? 1 : 0,
+          withWrapper: false,
+        })
+      } else {
+        // 通过APDU类型+参数构建
+        result = await buildFrame(
+          'DataNotification',
+          {},
+          {
+            srcWPort: 1,
+            dstWPort: 16,
+            encrypt: securityConfig.useCiphering,
+            compress: securityConfig.useCompression,
+            guek: securityConfig.guek,
+            gubk: securityConfig.gubk,
+            ak: securityConfig.ak,
+            kek: securityConfig.kek,
+            systemTitle: securityConfig.systemTitle,
+            invocationCounter: securityConfig.invocationCounter,
+            keyId: securityConfig.selectedKeyType === 'gubk' ? 1 : 0
+          }
+        )
+      }
 
       if (result.success) {
         message.success('打包成功')
         setParseResult({
           raw_hex: result.hex_data,
-          frame_length: result.frame_length
+          frame_length: result.frame_length,
+          apdu_hex: result.apdu_hex || '',
+          compress: result.compress,
+          encrypt: result.encrypt,
+          sc_flags: result.sc_flags || '',
         })
         addToHistory({
           hex: result.hex_data.substring(0, 50) + (result.hex_data.length > 50 ? '...' : ''),

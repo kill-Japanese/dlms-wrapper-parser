@@ -142,14 +142,19 @@ async def build_frame_endpoint(request: BuildRequest):
     - **src_wport**: 源WPort (默认1)
     - **dst_wport**: 目的WPort (默认16)
     - **encrypt**: 是否加密 (默认false)
+    - **compress**: 是否V.44压缩 (默认false，加密前压缩，SC置位bit7)
+    - **raw_apdu_hex**: 原始APDU十六进制数据（提供时跳过APDU构建，直接打包）
     - **encryption_key**: 加密密钥 (兼容别名，映射到guek)
     - **guek**: Global Unicast Encryption Key - 全局单播加密密钥（十六进制）
     - **gubk**: Global Unicast Broadcast Key - 广播密钥（十六进制）
     - **ak**: Authentication Key - 认证密钥（十六进制）
     - **kek**: Key Encryption Key - 密钥加密密钥（十六进制）
-    - **system_title**: 系统标题 (加密时必填)
+    - **system_title**: 系统标题 (加密/压缩时必填)
     - **invocation_counter**: 调用计数器 (默认1)
     - **key_id**: 密钥标识 (0=unicast/GUEK, 1=broadcast/GUBK, 2=system)
+
+    打包流程: APDU -> V.44压缩(compress=true) -> AES-GCM加密(encrypt=true) -> General-Glo-Ciphering封装 -> Wrapper
+    当compress=true且encrypt=true时，SC字节同时置位压缩(bit7)和加密(bit5)标志
     """
     try:
         result = build_frame(
@@ -158,6 +163,7 @@ async def build_frame_endpoint(request: BuildRequest):
             src_wport=request.src_wport,
             dst_wport=request.dst_wport,
             encrypt=request.encrypt,
+            compress=request.compress,
             encryption_key=request.encryption_key,
             guek=request.guek,
             gubk=request.gubk,
@@ -166,6 +172,7 @@ async def build_frame_endpoint(request: BuildRequest):
             system_title=request.system_title,
             invocation_counter=request.invocation_counter or 1,
             key_id=request.key_id,
+            raw_apdu_hex=request.raw_apdu_hex,
         )
         return BuildResponse(**result)
     except NotImplementedError as e:

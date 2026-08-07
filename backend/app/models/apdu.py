@@ -1,15 +1,15 @@
 """
 APDU模型定义
 
-DLMS/COSEM APDU 类型和标签:
+DLMS/COSEM APDU 类型和标签 (按IEC 62056-6 / Gurux标准):
 - DataNotification: tag = 0x0F (15)
 - GetRequest: tag = 0xC0 (192)
-- GetResponse: tag = 0xC1 (193)
-- SetRequest: tag = 0xC2 (194)
-- SetResponse: tag = 0xC3 (195)
-- EventNotification: tag = 0xC4 (196)
-- ActionRequest: tag = 0xC7 (199)
-- ActionResponse: tag = 0xC8 (200)
+- SetRequest: tag = 0xC1 (193)
+- EventNotification: tag = 0xC2 (194)
+- ActionRequest: tag = 0xC3 (195)
+- GetResponse: tag = 0xC4 (196)
+- SetResponse: tag = 0xC5 (197)
+- ActionResponse: tag = 0xC7 (199)
 - GeneralGloCiphering: tag = 0xDB (219)
 - GeneralCiphering: tag = 0xDA (218)
 """
@@ -132,7 +132,7 @@ class GetRequestAPDU(APDUBase):
 
 class GetResponseAPDU(APDUBase):
     """
-    GetResponse APDU (tag=0xC1, 193)
+    GetResponse APDU (tag=0xC4, 196)
 
     Get-Response 类型与Get-Request对应:
     - 1: Get-Response-Normal
@@ -160,7 +160,7 @@ class GetResponseAPDU(APDUBase):
 
 
 class SetRequestAPDU(APDUBase):
-    """SetRequest APDU (tag=0xC2, 194)"""
+    """SetRequest APDU (tag=0xC1, 193)"""
 
     type_name: str = "SetRequest"
     set_type: int = Field(default=1, description="Set请求类型")
@@ -168,10 +168,13 @@ class SetRequestAPDU(APDUBase):
     class_id: Optional[int] = Field(default=None, description="类ID")
     obis: Optional[str] = Field(default=None, description="OBIS码")
     attribute_id: Optional[int] = Field(default=None, description="属性ID")
+    access_selection: int = Field(default=0, description="访问选择 (0=无)")
+    data_type: Optional[str] = Field(default=None, description="值数据类型")
+    value: Any = Field(default=None, description="设置值 (解析后)")
 
 
 class SetResponseAPDU(APDUBase):
-    """SetResponse APDU (tag=0xC3, 195)"""
+    """SetResponse APDU (tag=0xC5, 197)"""
 
     type_name: str = "SetResponse"
     set_type: int = Field(default=1, description="Set响应类型")
@@ -182,10 +185,10 @@ class SetResponseAPDU(APDUBase):
 
 class EventNotificationAPDU(APDUBase):
     """
-    EventNotification APDU (tag=0xC4, 196)
+    EventNotification APDU (tag=0xC2, 194)
 
     格式:
-    - tag (1 byte) = 0xC4
+    - tag (1 byte) = 0xC2
     - time (可选, date-time)
     - cosem_attribute_descriptor (9 bytes)
     - attribute_descriptor_list (可选)
@@ -202,7 +205,7 @@ class EventNotificationAPDU(APDUBase):
 
 
 class ActionRequestAPDU(APDUBase):
-    """ActionRequest APDU (tag=0xC7, 199)"""
+    """ActionRequest APDU (tag=0xC3, 195)"""
 
     type_name: str = "ActionRequest"
     action_type: int = Field(default=1, description="Action请求类型")
@@ -213,7 +216,7 @@ class ActionRequestAPDU(APDUBase):
 
 
 class ActionResponseAPDU(APDUBase):
-    """ActionResponse APDU (tag=0xC8, 200)"""
+    """ActionResponse APDU (tag=0xC7, 199)"""
 
     type_name: str = "ActionResponse"
     action_type: int = Field(default=1, description="Action响应类型")
@@ -253,6 +256,25 @@ class GeneralCipheringAPDU(APDUBase):
     ciphered_data: str = Field(default="", description="加密数据")
 
 
+class ExceptionResponseAPDU(APDUBase):
+    """
+    ExceptionResponse APDU (tag=0xD8, 216)
+
+    ExceptionResponse 格式 (IEC 62056-53):
+    {
+        state-error    StateError,      (1 byte)
+        service-error  ServiceError     (1 byte)
+    }
+    """
+
+    type_name: str = "ExceptionResponse"
+    state_error: int = Field(default=0, description="状态错误码")
+    state_error_name: str = Field(default="", description="状态错误名称")
+    service_error: int = Field(default=0, description="服务错误码")
+    service_error_name: str = Field(default="", description="服务错误名称")
+    result: str = Field(default="", description="结果描述")
+
+
 class UnknownAPDU(APDUBase):
     """未知APDU类型"""
 
@@ -264,12 +286,13 @@ class UnknownAPDU(APDUBase):
 APDU_TYPES = {
     0x0F: DataNotificationAPDU,       # 15
     0xC0: GetRequestAPDU,             # 192
-    0xC1: GetResponseAPDU,            # 193
-    0xC2: SetRequestAPDU,             # 194
-    0xC3: SetResponseAPDU,            # 195
-    0xC4: EventNotificationAPDU,      # 196
-    0xC7: ActionRequestAPDU,          # 199
-    0xC8: ActionResponseAPDU,         # 200
+    0xC1: SetRequestAPDU,             # 193
+    0xC2: EventNotificationAPDU,      # 194
+    0xC3: ActionRequestAPDU,          # 195
+    0xC4: GetResponseAPDU,            # 196
+    0xC5: SetResponseAPDU,            # 197
+    0xC7: ActionResponseAPDU,         # 199
+    0xD8: ExceptionResponseAPDU,      # 216
     0xDA: GeneralCipheringAPDU,       # 218
     0xDB: GeneralGloCipheringAPDU,    # 219
 }
