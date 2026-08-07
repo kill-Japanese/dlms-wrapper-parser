@@ -88,7 +88,7 @@ function LayerView() {
           message="打包成功"
           description={
             <Space direction="vertical" size="small" style={{ width: '100%' }}>
-              <Text>打包流程：APDU → V.44压缩 → general-glo-ciphering</Text>
+              <Text>打包流程：APDU → V.44压缩 → general-glo-ciphering → Wrapper封装</Text>
               {parseResult.compress !== undefined && (
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   V.44压缩: {parseResult.compress ? '已启用' : '未启用'}
@@ -102,6 +102,14 @@ function LayerView() {
               {parseResult.sc_flags && (
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   SC标志: {parseResult.sc_flags}
+                </Text>
+              )}
+              {parseResult.with_wrapper !== undefined && (
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Wrapper封装: {parseResult.with_wrapper ? '已启用' : '未启用'}
+                  {parseResult.with_wrapper && parseResult.wrapper_src_wport !== undefined && (
+                    <span> (src_wport={parseResult.wrapper_src_wport}, dst_wport={parseResult.wrapper_dst_wport}, version={parseResult.wrapper_version || 1})</span>
+                  )}
                 </Text>
               )}
             </Space>
@@ -118,6 +126,9 @@ function LayerView() {
               <ExportOutlined />
               <Text strong>打包输出</Text>
               <Tag color="green">{parseResult.frame_length} 字节</Tag>
+              {parseResult.with_wrapper && (
+                <Tag color="blue">Wrapper</Tag>
+              )}
             </Space>
           }
           style={{ borderLeft: '3px solid var(--ant-green-5)' }}
@@ -127,7 +138,7 @@ function LayerView() {
             <Descriptions.Item label="帧长度">
               <Statistic value={parseResult.frame_length} suffix="bytes" valueStyle={{ fontSize: 14 }} />
             </Descriptions.Item>
-            <Descriptions.Item label="十六进制数据">
+            <Descriptions.Item label={parseResult.with_wrapper ? "Wrapper帧数据" : "十六进制数据"}>
               <div style={{
                 maxHeight: 200, overflow: 'auto',
                 padding: 8, background: '#fafafa', borderRadius: 4,
@@ -139,6 +150,22 @@ function LayerView() {
             {parseResult.apdu_hex && (
               <Descriptions.Item label="原始APDU">
                 <Text code style={{ fontSize: 11, wordBreak: 'break-all' }}>{parseResult.apdu_hex}</Text>
+              </Descriptions.Item>
+            )}
+            {parseResult.with_wrapper && parseResult.pre_wrapper_hex && (
+              <Descriptions.Item label="Wrapper前数据（压缩+加密后）">
+                <div style={{
+                  maxHeight: 150, overflow: 'auto',
+                  padding: 8, background: '#f6ffed', borderRadius: 4,
+                  fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all'
+                }}>
+                  {parseResult.pre_wrapper_hex}
+                </div>
+                {parseResult.pre_wrapper_length !== undefined && (
+                  <Text type="secondary" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
+                    长度: {parseResult.pre_wrapper_length} bytes
+                  </Text>
+                )}
               </Descriptions.Item>
             )}
           </Descriptions>

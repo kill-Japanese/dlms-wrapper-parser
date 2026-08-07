@@ -1024,20 +1024,29 @@ def build_frame(
                     }
 
         # Step 3: Wrapper封装（可选）
-        # 打包流程: APDU -> V.44压缩 -> general-glo-ciphering (-> Wrapper封装)
+        # 打包流程: APDU -> V.44压缩 -> general-glo-ciphering -> Wrapper封装
         # 默认不封装Wrapper，仅当 with_wrapper=True 时添加
         if with_wrapper:
             frame = build_wpd(apdu_data, src_wport=src_wport, dst_wport=dst_wport)
         else:
             frame = apdu_data
 
-        return {
+        result = {
             "success": True,
             "hex_data": bytes_to_hex(frame),
             "frame_length": len(frame),
-            "apdu_hex": bytes_to_hex(apdu_data) if with_wrapper else "",
             "message": "组帧成功",
         }
+
+        if with_wrapper:
+            # 返回 Wrapper 封装前的数据（已压缩+加密）和 Wrapper 元数据
+            result["pre_wrapper_hex"] = bytes_to_hex(apdu_data)
+            result["pre_wrapper_length"] = len(apdu_data)
+            result["wrapper_version"] = 1
+            result["wrapper_src_wport"] = src_wport
+            result["wrapper_dst_wport"] = dst_wport
+
+        return result
 
     except Exception as e:
         return {

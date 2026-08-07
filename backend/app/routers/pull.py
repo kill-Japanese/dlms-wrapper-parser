@@ -1063,12 +1063,12 @@ async def package_apdu_endpoint(request: PackageApduRequest):
     """
     将原始APDU数据打包为DLMS帧。
 
-    打包流程（APDU->V.44->general-glo-ciphering）:
+    打包流程（APDU->V.44->general-glo-ciphering->Wrapper）:
     1. 原始APDU数据
     2. V.44压缩（如果compress=true）→ SC置位bit7
     3. AES-GCM加密（如果encrypt=true）→ SC置位bit5
     4. General-Glo-Ciphering封装（SC字节同时置位压缩+加密标志）
-    5. Wrapper帧封装（仅当with_wrapper=true时）
+    5. Wrapper帧封装（WPD头：version + src_wport + dst_wport + length + payload）
 
     当compress=true且encrypt=true时:
     - SC字节 = 0xB1 (bit7=压缩, bit5=加密, bit4=认证, bit0=Suite1)
@@ -1102,6 +1102,7 @@ async def package_apdu_endpoint(request: PackageApduRequest):
             result["apdu_length"] = len(hex_str) // 2
             result["compress"] = request.compress
             result["encrypt"] = request.encrypt
+            result["with_wrapper"] = request.with_wrapper
             sc_desc = []
             if request.compress:
                 sc_desc.append("bit7=压缩(V.44)")
@@ -1109,6 +1110,11 @@ async def package_apdu_endpoint(request: PackageApduRequest):
                 sc_desc.append("bit5=加密(AES-GCM)")
             sc_desc.append("bit0=Suite1")
             result["sc_flags"] = ", ".join(sc_desc)
+
+            # 当启用 Wrapper 时，附加 Wrapper 元数据
+            if request.with_wrapper:
+                result["wrapper_src_wport"] = request.src_wport
+                result["wrapper_dst_wport"] = request.dst_wport
 
         return result
     except Exception as e:

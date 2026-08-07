@@ -195,7 +195,7 @@ function ParseControls() {
 
       let result
       if (isRawApdu) {
-        // 原始APDU打包：V.44压缩 + AES-GCM加密 + Wrapper封装
+        // 原始APDU打包：V.44压缩 + AES-GCM加密 + general-glo-ciphering + Wrapper封装
         const needsEncryption = securityConfig.useCiphering
         const needsCompression = securityConfig.useCompression
 
@@ -214,7 +214,9 @@ function ParseControls() {
           ak: securityConfig.ak,
           invocationCounter: securityConfig.invocationCounter,
           keyId: securityConfig.selectedKeyType === 'gubk' ? 1 : 0,
-          withWrapper: false,
+          withWrapper: true,
+          srcWPort: 1,
+          dstWPort: 16,
         })
       } else {
         // 通过APDU类型+参数构建
@@ -246,6 +248,12 @@ function ParseControls() {
           compress: result.compress,
           encrypt: result.encrypt,
           sc_flags: result.sc_flags || '',
+          with_wrapper: result.with_wrapper || false,
+          wrapper_src_wport: result.wrapper_src_wport,
+          wrapper_dst_wport: result.wrapper_dst_wport,
+          wrapper_version: result.wrapper_version,
+          pre_wrapper_hex: result.pre_wrapper_hex || '',
+          pre_wrapper_length: result.pre_wrapper_length,
         })
         addToHistory({
           hex: result.hex_data.substring(0, 50) + (result.hex_data.length > 50 ? '...' : ''),
